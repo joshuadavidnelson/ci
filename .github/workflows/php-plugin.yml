@@ -97,7 +97,7 @@ jobs:
 
       - name: "Cache Composer dependencies"
         if: ${{ ! inputs.lint-standalone }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ matrix.php }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -158,7 +158,7 @@ jobs:
           coverage: none
 
       - name: "Cache Composer dependencies"
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -290,7 +290,7 @@ jobs:
 
       - name: "Cache Composer dependencies"
         if: steps.suite.outputs.run == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -429,7 +429,7 @@ jobs:
           coverage: none
 
       - name: "Cache Composer dependencies"
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
