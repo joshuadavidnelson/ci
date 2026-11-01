@@ -14,8 +14,16 @@ on:
         description: "JSON array of PHP versions for the lint matrix."
         type: string
         default: '["8.2", "8.3", "8.4", "8.5"]'
+      lint-standalone:
+        description: "Lint with a standalone php-parallel-lint instead of `composer run lint`, without installing the project's dependencies. For PHP versions older than the lock's dev tools need (e.g. 7.4)."
+        type: boolean
+        default: false
+      lint-paths:
+        description: "Space-separated paths the standalone lint checks, relative to working-directory (vendor/ and node_modules/ are excluded)."
+        type: string
+        default: "."
       lint-composer-args:
-        description: "Extra arguments for `composer install` in the lint matrix only, e.g. to lint PHP 7.4 with a lock resolved for a newer platform."
+        description: "Extra arguments for `composer install` in the lint matrix. Note --ignore-platform-reqs does not make an older PHP work if an autoloaded file (e.g. PHPUnit 10+'s Functions.php) needs newer syntax; use lint-standalone for that."
         type: string
         default: ""
       quality-php-version:
@@ -88,6 +96,7 @@ jobs:
           coverage: none
 
       - name: "Cache Composer dependencies"
+        if: ${{ ! inputs.lint-standalone }}
         uses: actions/cache@v4
         with:
           path: ${{ inputs.working-directory }}/vendor
@@ -95,6 +104,7 @@ jobs:
           restore-keys: composer-${{ runner.os }}-php${{ matrix.php }}-
 
       - name: "Install Composer dependencies"
+        if: ${{ ! inputs.lint-standalone }}
         env:
           EXTRA_ARGS: ${{ inputs.lint-composer-args }}
         run: |
@@ -102,7 +112,20 @@ jobs:
           composer install --no-progress --no-interaction "${extra[@]}"
 
       - name: "PHP lint"
+        if: ${{ ! inputs.lint-standalone }}
         run: composer run lint
+
+      # parallel-lint in its own Composer home: none of the project's
+      # autoloaded files are loaded, so PHP older than the dev tools works.
+      - name: "PHP lint (standalone)"
+        if: inputs.lint-standalone
+        env:
+          LINT_PATHS: ${{ inputs.lint-paths }}
+        run: |
+          tools="$RUNNER_TEMP/lint-tools"
+          COMPOSER_HOME="$tools" composer global require --no-interaction --no-progress "php-parallel-lint/php-parallel-lint:^1.4"
+          read -r -a paths <<< "$LINT_PATHS"
+          "$tools/vendor/bin/parallel-lint" --exclude vendor --exclude node_modules --exclude .git "${paths[@]}"
 
   quality:
     name: "Code quality"

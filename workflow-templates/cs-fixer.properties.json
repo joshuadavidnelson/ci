@@ -1,7 +1,0 @@
-{
-  "name": "Coding Standards fixer (joshuadavidnelson/ci)",
-  "description": "Runs phpcbf on demand and opens a PR with the fixes.",
-  "iconName": "octicon tools",
-  "categories": ["PHP"],
-  "filePatterns": [".phpcs.xml.dist$"]
-}

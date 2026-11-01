@@ -17,7 +17,6 @@ Callers use the moving `@v1` tag. Releases are semver tags (`v1.0.0`, `v1.1.0`, 
 | [`.github/workflows/pr-report.yml`](.github/workflows/pr-report.yml) | reusable workflow | Called from a `workflow_run` workflow. Downloads the sections from the finished run, checks the PR against the API, merges the sections, and posts the one sticky comment. |
 | [`.github/workflows/wp-deploy.yml`](.github/workflows/wp-deploy.yml) | reusable workflow | Deploys a tag to WordPress.org SVN after the named CI workflows passed on it, behind an environment approval. |
 | [`.github/workflows/wp-readme-deploy.yml`](.github/workflows/wp-readme-deploy.yml) | reusable workflow | Syncs `readme.txt` and `.wordpress-org/` assets to SVN trunk. |
-| [`.github/workflows/cs-fixer.yml`](.github/workflows/cs-fixer.yml) | reusable workflow | Runs `phpcbf` and opens a PR with the fixes. |
 | [`actions/setup-php`](actions/setup-php/action.yml) | composite action | Installs PHP, restores the Composer cache and runs `composer install`. For a repo's own ad-hoc workflows. |
 | [`actions/render-report`](actions/render-report/action.yml) | Node action | Builds section JSON from clover / json-summary / PHPMetrics / ESLint output, enforces section status, and merges sections into the comment. |
 | [`tools/js-complexity`](tools/js-complexity) | npm package | The pinned ESLint toolchain `js.yml` measures complexity with. |
@@ -147,7 +146,7 @@ jobs:
 
 `workflow_run` only fires from the default branch (`stable`), so **the comment appears only once this file has merged to stable**. Until then PRs run CI and upload sections, but nothing comments.
 
-### Deploys and the CS fixer
+### Deploys
 
 ```yaml
 # .github/workflows/deploy.yml
@@ -193,21 +192,6 @@ jobs:
       SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
 ```
 
-```yaml
-# .github/workflows/cs-fixer.yml
-name: "Coding Standards"
-on:
-  workflow_dispatch: null
-permissions:
-  contents: read
-jobs:
-  fix:
-    uses: joshuadavidnelson/ci/.github/workflows/cs-fixer.yml@v1
-    permissions:
-      contents: write
-      pull-requests: write
-```
-
 `wp-deploy.yml` runs its deploy job in the `wordpress-org` environment (input `environment`). Give that environment a required reviewer **before the first tag**: if it does not exist, GitHub creates it on the first run with no protection rules, so that deploy goes straight to SVN without waiting for approval (the verify job's green-CI check still applies). An auto-created environment also has no environment secrets, so the SVN credentials must then come from repository secrets via `secrets: inherit`. The SVN secrets can be repository secrets passed with `secrets: inherit` or environment secrets on `wordpress-org`; the environment's take precedence.
 
 ## Inputs
@@ -217,7 +201,9 @@ jobs:
 | Input | Default | |
 | --- | --- | --- |
 | `php-versions` | `'["8.2", "8.3", "8.4", "8.5"]'` | JSON array for the lint matrix. |
-| `lint-composer-args` | `""` | Extra `composer install` arguments for the lint matrix only (see below). |
+| `lint-standalone` | `false` | Lint with a standalone php-parallel-lint over `lint-paths`, without the project's dependencies (see below). |
+| `lint-paths` | `"."` | Paths for the standalone lint. |
+| `lint-composer-args` | `""` | Extra `composer install` arguments for the lint matrix only. |
 | `quality-php-version` | `"8.4"` | PHP for quality, tests/coverage and metrics. |
 | `source-paths` | `"src/"` | Space-separated, relative to `working-directory`. The base branch's PHPMetrics run measures these. |
 | `tests` | `true` | Run the PHPUnit job. It also skips itself when there is no suite (see the contract). |
@@ -228,7 +214,7 @@ jobs:
 | `working-directory` | `"."` | Directory holding `composer.json`. |
 | `ci-ref` | `"v1"` | Ref of this repo to load the report scripts from (see below). |
 
-Older PHP in the lint matrix: setup-php and php-parallel-lint (1.x) both run on PHP 7.4, so `php-versions: '["7.4", "8.0", "8.4"]'` works as long as `composer install` succeeds on each version. If the lock file pins tools that need a newer PHP (PHPUnit 10+, PHPStan 2), the 7.4 leg cannot install them. Either keep `config.platform.php` at the oldest supported version, or pass `lint-composer-args: "--ignore-platform-reqs"` so the lint legs install anyway; only `composer lint` runs there, so the tools that need newer PHP are never loaded. Make sure the lint script does not load `vendor/autoload.php` into the code under test.
+Older PHP in the lint matrix: setup-php and php-parallel-lint 1.x both run on PHP 7.4, so `php-versions: '["7.4", "8.0", "8.4"]'` works if `composer install` succeeds on every version, i.e. the lock (or `config.platform.php`) targets the oldest version. If the lock pins dev tools that need newer PHP (PHPUnit 10+, PHPStan 2), set `lint-standalone: true`: each lint leg then installs php-parallel-lint on its own and runs it over `lint-paths` (default `.`, excluding `vendor/` and `node_modules/`) instead of `composer run lint`. `lint-composer-args: "--ignore-platform-reqs"` is **not** enough on its own: parallel-lint loads the project's `vendor/autoload.php`, and PHPUnit 11's autoloaded `Functions.php` does not parse on 7.4 (the self-test hit exactly this). The self-test lints its fixture on 7.4 with `lint-standalone`.
 
 Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus `report-meta` (PRs only, no `needs`, so even a lint failure gets a comment saying so). Everything runs with `contents: read`.
 
@@ -256,11 +242,10 @@ Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus 
 
 The caller grants `pull-requests: write` and `actions: read`. No secrets.
 
-### `wp-deploy.yml`, `wp-readme-deploy.yml`, `cs-fixer.yml`
+### `wp-deploy.yml`, `wp-readme-deploy.yml`
 
 - `wp-deploy.yml`: `slug` (required), `required-workflows` (newline list, default `Integrate`), `environment` (default `wordpress-org`), `build-dir`, `dry-run`. Secrets `SVN_USERNAME`, `SVN_PASSWORD`. `required-workflows` can only list workflows that run on the tagged commit itself, which in practice means workflows triggered by `push` to the branch you tag from. A PR-only workflow (E2E on `pull_request`, say) never runs on that commit, so listing it would block every deploy with "never ran on this commit".
 - `wp-readme-deploy.yml`: `slug` (required), `assets-dir` (default `.wordpress-org`), `ignore-other-files` (default `true`). Secrets `SVN_USERNAME`, `SVN_PASSWORD` (required).
-- `cs-fixer.yml`: `php-version` (default `8.4`, keep it equal to `quality-php-version`), `working-directory`, `add-paths` (default `*.php`), `branch` (default `cs-fixer`).
 
 ### `ci-ref`
 
@@ -340,8 +325,9 @@ For a repository moving onto this CI (archived-post-status, disable-blog, script
 3. **Integrate.** Replace the code-analysis, coverage and report jobs in `.github/workflows/integrate.yml` with the `php` (and `js`) jobs from [the caller example](#githubworkflowsintegrateyml). Keep the workflow name `Integrate`. Keep repo-specific jobs (plugin check, `.pot` freshness, WordPress integration tests) in the same file.
 4. **PR report.** Add `.github/workflows/pr-report.yml` from [the caller example](#githubworkflowspr-reportyml). It only runs once merged to the default branch (`stable`).
 5. **Delete the copies.** Remove `.github/actions/setup-php-composer`, `.github/scripts/{coverage,check-coverage,render-pr-report}.js` and their tests and Jest config, and the `test:workflows` npm script if nothing else uses it. If another workflow in the repo still used the local `setup-php-composer` action, point it at `joshuadavidnelson/ci/actions/setup-php@v1` (inputs `php-version`, `coverage`, `working-directory`).
-6. **Deploys (optional).** Replace `deploy.yml`, `deploy-readme.yml` and `cs-fixer.yaml` with the [callers above](#deploys-and-the-cs-fixer), passing the plugin `slug` and, for `wp-deploy.yml`, the names of every workflow that must be green on a tag in `required-workflows`.
-7. **Check it.** Open a PR. CI should show the `php / …` (and `js / …`) jobs. After the PR report caller is on `stable`, each PR gets one comment headed "📊 PR Report", updated in place on every push.
+6. **Deploys (optional).** Replace `deploy.yml` and `deploy-readme.yml` with the [callers above](#deploys), passing the plugin `slug` and, for `wp-deploy.yml`, the names of every workflow that must be green on a tag in `required-workflows`.
+7. **No CS-fixer workflow.** Delete `cs-fixer.yaml`. There is deliberately no shared replacement: a PR with coding-standards violations fails the PHPCS check, and the author fixes it locally with the repo's composer tooling (e.g. `composer phpcbf`).
+8. **Check it.** Open a PR. CI should show the `php / …` (and `js / …`) jobs. After the PR report caller is on `stable`, each PR gets one comment headed "📊 PR Report", updated in place on every push.
 
 Things that differ from the per-repo copies:
 
@@ -354,11 +340,13 @@ Things that differ from the per-repo copies:
 
 ## Deviations from the shared spec
 
-- **`ci-ref` input.** Every reusable workflow except the deploy and CS-fixer ones has a `ci-ref` input (default `v1`), because a reusable workflow cannot resolve its own ref to load scripts from. With `@v1` callers need not set it.
+- **`ci-ref` input.** Every reusable workflow except the deploy ones has a `ci-ref` input (default `v1`), because a reusable workflow cannot resolve its own ref to load scripts from. With `@v1` callers need not set it.
 - **`report-meta-js`.** `js.yml` uploads its metadata as `report-meta-js`, not `report-meta`, so a caller using both workflows in one run does not upload two artifacts with the same name. `pr-report.yml` reads every `report-meta*` artifact and requires them to agree.
 - **No bundling for `actions/render-report`.** It uses Node built-ins only, so `index.js` runs as-is (`using: node24`) with no `dist/` bundle to rebuild. The reusable workflows run the same file with `node … index.js <command>` from a fetch of this repo at `ci-ref`, not via `uses:`.
 - **Setup steps inlined.** The reusable workflows inline the three `actions/setup-php` steps instead of calling the action, for the same reason as `ci-ref`. The cache key also includes the PHP version, so repos that do not pin `config.platform.php` are safe.
+- **No `cs-fixer.yml`.** The spec listed a reusable CS-fixer workflow; it is intentionally not provided. Coding-standards violations fail the PHPCS check in CI and are fixed locally with each repo's composer scripts.
 - **`php-quality` section.** The quality job also uploads a `php-quality` section (PHPCS / PHPStan / PHPMD outcomes), which the spec did not list.
+- **Lint options.** `lint-standalone` / `lint-paths` lint without the project's dependencies, for PHP older than the lock's dev tools; `lint-composer-args` passes extra `composer install` arguments.
 - **`js.complexity` long form.** Besides the flat `{ "cyclomatic": n, "cognitive": n }` ceilings (all gated), the `{ max, gate }` form is accepted, so a ceiling can be reported without failing CI.
 - **Sections on every event.** Sections are uploaded on push runs too (cheap, and the self-test merges them); `report-meta` is uploaded only for PRs, so `pr-report.yml` has nothing to post for pushes.
 

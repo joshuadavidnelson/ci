@@ -72,10 +72,10 @@ jobs:
     with:
       working-directory: test/fixtures/php-plugin
       # 7.4 proves the lint leg for repos supporting older PHP than their
-      # dev tools: the lock targets 8.2, so the lint legs install with
-      # --ignore-platform-reqs and only parallel-lint runs there.
+      # dev tools: the lock targets 8.2 (PHPUnit 11), so the lint legs use a
+      # standalone parallel-lint instead of the project's vendor/.
       php-versions: '["7.4", "8.2", "8.4"]'
-      lint-composer-args: "--ignore-platform-reqs"
+      lint-standalone: true
       ci-ref: ${{ github.sha }}
 
   js-fixture:
