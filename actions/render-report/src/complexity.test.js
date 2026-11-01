@@ -156,6 +156,12 @@ describe( 'buildComplexitySection', () => {
 		expect( section.summary ).toMatch( /1 file could not be parsed/ );
 	} );
 
+	it( 'says which ESLint config measured the PR', () => {
+		expect( buildComplexitySection( { head, thresholds, mode: 'repo' } ).summary ).toMatch( /^Measured with the repo's own ESLint config\./ );
+		expect( buildComplexitySection( { head, thresholds, mode: 'builtin' } ).summary ).toMatch( /^Measured with the built-in complexity config\./ );
+		expect( buildComplexitySection( { head, thresholds } ).summary ).not.toMatch( /Measured with/ );
+	} );
+
 	it( 'fails when ESLint produced nothing', () => {
 		expect( buildComplexitySection( { head: null, thresholds } ).status ).toBe( 'fail' );
 	} );

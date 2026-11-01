@@ -12,14 +12,14 @@ execFileSync( process.execPath, [
 	'--test-reporter-destination=coverage/lcov.info',
 	'--test-reporter=spec',
 	'--test-reporter-destination=stdout',
-	'test/*.test.js',
+	'src/*.test.js',
 ], { stdio: 'inherit' } );
 
 const totals = { lines: [ 0, 0 ], functions: [ 0, 0 ], branches: [ 0, 0 ] };
 let inSource = false;
 for ( const line of readFileSync( 'coverage/lcov.info', 'utf8' ).split( '\n' ) ) {
 	if ( line.startsWith( 'SF:' ) ) {
-		inSource = /(^|\/)src\//.test( line.slice( 3 ) );
+		inSource = /(^|\/)src\//.test( line.slice( 3 ) ) && ! line.endsWith( '.test.js' );
 	}
 	if ( ! inSource ) {
 		continue;

@@ -228,6 +228,7 @@ const COMMANDS = {
 				root: path.resolve( get( 'root', '.' ) ),
 				baseRoot: path.resolve( get( 'base-root', '.' ) ),
 				thresholds,
+				mode: get( 'mode' ),
 			} ),
 			get,
 			env,

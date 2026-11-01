@@ -257,6 +257,7 @@ jobs:
             --base reports/eslint-complexity-base.json \
             --root . \
             --base-root "$GITHUB_WORKSPACE/.base/$WORKDIR" \
+            --mode "$(cat reports/eslint-complexity.json.mode 2> /dev/null || true)" \
             --thresholds "$THRESHOLDS" \
             --output "$RUNNER_TEMP/sections/js-complexity.json"
 

@@ -130,6 +130,13 @@ jobs:
               exit 1
             }
           done
+          # The JS fixture must be measured through its own lint:complexity
+          # config; a silent fallback to the built-in one is a failure here.
+          jq -e '.summary | test("repo.s own ESLint config")' \
+            "$RUNNER_TEMP/report/report-section-js-complexity/js-complexity.json" > /dev/null || {
+            echo "::error::js-complexity fell back to the built-in config instead of the fixture's lint:complexity."
+            exit 1
+          }
           if grep -q 'rejected as malformed' "$RUNNER_TEMP/pr-report.md"; then
             echo "::error::The merge rejected a fixture section."
             exit 1
