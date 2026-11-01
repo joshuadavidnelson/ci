@@ -37,7 +37,7 @@ runs:
         tools: ${{ inputs.tools }}
 
     - name: "Cache Composer dependencies"
-      uses: "actions/cache@v4"
+      uses: "actions/cache@v6"
       with:
         path: ${{ inputs.working-directory }}/vendor
         # Keyed on the PHP version as well as the lock file: a repo that
