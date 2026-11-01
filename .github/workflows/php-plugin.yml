@@ -14,6 +14,10 @@ on:
         description: "JSON array of PHP versions for the lint matrix."
         type: string
         default: '["8.2", "8.3", "8.4", "8.5"]'
+      lint-composer-args:
+        description: "Extra arguments for `composer install` in the lint matrix only, e.g. to lint PHP 7.4 with a lock resolved for a newer platform."
+        type: string
+        default: ""
       quality-php-version:
         description: "PHP version for quality, coverage and metrics."
         type: string
@@ -87,7 +91,11 @@ jobs:
           restore-keys: composer-${{ runner.os }}-php${{ matrix.php }}-
 
       - name: "Install Composer dependencies"
-        run: composer install --no-progress --no-interaction
+        env:
+          EXTRA_ARGS: ${{ inputs.lint-composer-args }}
+        run: |
+          read -r -a extra <<< "$EXTRA_ARGS"
+          composer install --no-progress --no-interaction "${extra[@]}"
 
       - name: "PHP lint"
         run: composer run lint

@@ -76,6 +76,28 @@ describe( 'complexityConfig', () => {
 		} );
 	} );
 
+	it( 'treats flat ceilings as gated, the shape a repo eslint.config.js reads', () => {
+		expect( complexityConfig( { js: { complexity: { _comment: 'x', cyclomatic: 12, cognitive: 20 } } } ) ).toEqual( {
+			max: { cyclomatic: 12, cognitive: 20 },
+			gate: [ 'cyclomatic', 'cognitive' ],
+		} );
+	} );
+
+	it( 'gates only the flat keys given, defaulting the other', () => {
+		expect( complexityConfig( { js: { complexity: { cognitive: 20 } } } ) ).toEqual( {
+			max: { cyclomatic: 10, cognitive: 20 },
+			gate: [ 'cognitive' ],
+		} );
+	} );
+
+	it( 'rejects a non-numeric ceiling', () => {
+		expect( () => complexityConfig( { js: { complexity: { cyclomatic: 'ten' } } } ) ).toThrow( /must be a number/ );
+	} );
+
+	it( 'rejects an unknown flat key', () => {
+		expect( () => complexityConfig( { js: { complexity: { halstead: 3 } } } ) ).toThrow( /halstead/ );
+	} );
+
 	it( 'rejects an unknown metric key', () => {
 		expect( () => complexityConfig( { js: { complexity: { gate: [ 'halstead' ] } } } ) ).toThrow( /halstead/ );
 	} );

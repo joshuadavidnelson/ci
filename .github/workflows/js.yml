@@ -21,6 +21,10 @@ on:
         description: "Space-separated paths to measure complexity over, relative to working-directory."
         type: string
         default: "src/"
+      complexity-script:
+        description: "npm script that runs the repo's own ESLint for complexity. Empty, or a repo without it, uses the built-in config over js-source-paths."
+        type: string
+        default: "lint:complexity"
       coverage:
         description: "Run `npm run test:coverage` and report coverage/coverage-summary.json."
         type: boolean
@@ -198,30 +202,25 @@ jobs:
       - name: "Setup Node.js"
         uses: actions/setup-node@v5
         with:
-          node-version: "24"
+          node-version: ${{ inputs.node-version }}
 
-      # The measuring toolchain is pinned in this repo (tools/js-complexity)
-      # and replaces the repo's own ESLint config, so the repo installs
-      # nothing and every repo is scored by the same rules.
+      # The fallback toolchain is pinned in this repo (tools/js-complexity),
+      # so a repo without a lint:complexity script installs nothing.
       - name: "Install the complexity toolchain"
         working-directory: "."
         run: npm ci --prefix "$CI_TOOLS/tools/js-complexity" --no-audit --no-fund
 
+      # Uses the repo's `complexity-script` (its own eslint.config.js) when
+      # present, else the built-in config. See tools/js-complexity/measure.sh.
       - name: "Measure complexity"
         id: head
         continue-on-error: true
         env:
           SOURCE_PATHS: ${{ inputs.js-source-paths }}
+          SCRIPT: ${{ inputs.complexity-script }}
         run: |
-          mkdir -p reports
           read -r -a paths <<< "$SOURCE_PATHS"
-          # Exit 1 means parse errors, which the section reports; only a
-          # missing output file is a tooling failure.
-          node "$CI_TOOLS/tools/js-complexity/node_modules/eslint/bin/eslint.js" \
-            --config "$CI_TOOLS/tools/js-complexity/eslint.config.mjs" \
-            --no-error-on-unmatched-pattern --format json \
-            --output-file reports/eslint-complexity.json "${paths[@]}" || true
-          test -s reports/eslint-complexity.json
+          "$CI_TOOLS/tools/js-complexity/measure.sh" reports/eslint-complexity.json "$SCRIPT" "${paths[@]}"
 
       - name: "Checkout base branch"
         if: github.event_name == 'pull_request'
@@ -236,24 +235,17 @@ jobs:
         continue-on-error: true
         env:
           SOURCE_PATHS: ${{ inputs.js-source-paths }}
+          SCRIPT: ${{ inputs.complexity-script }}
         run: |
           base="$GITHUB_WORKSPACE/.base/$WORKDIR"
-          paths=()
-          for p in $SOURCE_PATHS; do
-            if [ -e "$base/$p" ]; then
-              paths+=("$p")
-            fi
-          done
-          if [ "${#paths[@]}" -eq 0 ]; then
-            echo "::notice::None of '$SOURCE_PATHS' exist on the base branch, so there is no base to compare."
+          if [ ! -d "$base" ]; then
+            echo "::notice::Base branch has no $WORKDIR, so there is no base to compare."
             exit 0
           fi
           out="$PWD/reports/eslint-complexity-base.json"
+          read -r -a paths <<< "$SOURCE_PATHS"
           cd "$base"
-          node "$CI_TOOLS/tools/js-complexity/node_modules/eslint/bin/eslint.js" \
-            --config "$CI_TOOLS/tools/js-complexity/eslint.config.mjs" \
-            --no-error-on-unmatched-pattern --format json \
-            --output-file "$out" "${paths[@]}" || true
+          "$CI_TOOLS/tools/js-complexity/measure.sh" "$out" "$SCRIPT" "${paths[@]}"
 
       - name: "Build report section"
         if: always() && steps.head.outcome != 'skipped'

@@ -1,11 +1,16 @@
 {
   "name": "ci-fixture-js-package",
   "private": true,
-  "description": "Fixture the ci repository's self-test runs js.yml against. Uses Node's built-in test runner, so it has no dependencies to install.",
+  "description": "Fixture the ci repository's self-test runs js.yml against. Tests use Node's built-in runner; ESLint is only here for the lint:complexity contract.",
   "license": "GPL-2.0-or-later",
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
-    "test:coverage": "node scripts/coverage.mjs"
+    "test:coverage": "node scripts/coverage.mjs",
+    "lint:complexity": "eslint src/"
+  },
+  "devDependencies": {
+    "eslint": "^10.14.0",
+    "eslint-plugin-sonarjs": "^4.2.2"
   }
 }

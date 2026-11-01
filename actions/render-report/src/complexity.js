@@ -105,17 +105,45 @@ function summarise( functions, max ) {
 /**
  * Reads and checks quality-thresholds.json's optional js.complexity block.
  *
+ * Two shapes are accepted:
+ *
+ *   { "cyclomatic": 10, "cognitive": 15 }
+ *       Flat ceilings. Every key given is gated, like a coverage floor:
+ *       this is the shape a repo's own eslint.config.js reads its rule
+ *       thresholds from.
+ *
+ *   { "max": { "cyclomatic": 10, "cognitive": 15 }, "gate": [ "cognitive" ] }
+ *       Ceilings plus an explicit gate list, mirroring metrics.max/gate,
+ *       for a ceiling that should be reported but not fail CI.
+ *
+ * With no block at all, the defaults are reported and nothing is gated.
+ *
  * @param {Object} thresholds The parsed thresholds file.
  * @return {{max: Object, gate: string[]}} Ceilings and gated metric keys.
  */
 function complexityConfig( thresholds ) {
 	const block = ( thresholds && thresholds.js && thresholds.js.complexity ) || {};
-	const max = { ...DEFAULT_MAX, ...( block.max || {} ) };
-	const gate = block.gate || [];
+	const structured = 'max' in block || 'gate' in block;
+
+	let max;
+	let gate;
+	if ( structured ) {
+		max = { ...DEFAULT_MAX, ...( block.max || {} ) };
+		gate = block.gate || [];
+	} else {
+		const flat = Object.fromEntries( Object.entries( block ).filter( ( [ key ] ) => ! key.startsWith( '_' ) ) );
+		max = { ...DEFAULT_MAX, ...flat };
+		gate = Object.keys( flat );
+	}
 
 	for ( const key of [ ...Object.keys( max ), ...gate ] ) {
 		if ( ! METRICS[ key ] ) {
 			throw new Error( `complexity: "${ key }" in js.complexity is not a metric (expected ${ Object.keys( METRICS ).join( ', ' ) }).` );
+		}
+	}
+	for ( const [ key, ceiling ] of Object.entries( max ) ) {
+		if ( typeof ceiling !== 'number' ) {
+			throw new Error( `complexity: js.complexity "${ key }" must be a number.` );
 		}
 	}
 	return { max, gate };

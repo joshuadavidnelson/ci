@@ -10,8 +10,8 @@
   },
   "js": {
     "complexity": {
-      "max": { "cyclomatic": 10, "cognitive": 15 },
-      "gate": [ "cyclomatic", "cognitive" ]
+      "cyclomatic": 10,
+      "cognitive": 15
     }
   }
 }

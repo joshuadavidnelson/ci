@@ -80,8 +80,6 @@ jobs:
     with:
       working-directory: test/fixtures/js-package
       js-source-paths: "src/"
-      # The fixture has no dependencies, so there is no npm cache to save.
-      node-cache: ""
       ci-ref: ${{ github.sha }}
 
   # Merges the sections the fixture runs uploaded, the way pr-report.yml

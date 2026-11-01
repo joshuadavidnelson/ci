@@ -48,8 +48,11 @@ The coverage job installs Xdebug. If the script sets `-dxdebug.mode=coverage` (a
 | Script | Must write |
 | --- | --- |
 | `test:coverage` | `coverage/coverage-summary.json` (istanbul `json-summary`: Jest `--coverage --coverageReporters=json-summary`, or Vitest `coverage.reporter: ['json-summary']`) |
+| `lint:complexity` (optional; name set by the `complexity-script` input) | Runs the repo's own ESLint over its JS, e.g. `"eslint assets/js"`, with a flat `eslint.config.js` that registers `eslint-plugin-sonarjs` as `sonarjs`. |
 
-`js.yml` runs `npm ci`, so commit `package-lock.json`. Complexity needs nothing from the repo: it uses this repository's pinned ESLint, with its own config, over `js-source-paths`.
+`js.yml` runs `npm ci`, so commit `package-lock.json`.
+
+Complexity runs `npm run lint:complexity -- -f json -o <file> --no-inline-config --rule 'complexity: [warn, 0]' --rule 'sonarjs/cognitive-complexity: [warn, 0]'`. The rule overrides set the thresholds to 0 so every function is reported with its score, and the ceilings from `quality-thresholds.json` are applied afterwards. Your config can read the same ceilings from `quality-thresholds.json`, so `npm run lint:complexity` fails locally on the numbers CI gates on (see [the JS fixture](test/fixtures/js-package/eslint.config.js)). Without the script, or if it produces no ESLint JSON (for example because sonarjs is not registered), js.yml falls back to this repository's pinned ESLint and [config](tools/js-complexity/eslint.config.mjs) over `js-source-paths`.
 
 ### `quality-thresholds.json`
 
@@ -73,17 +76,16 @@ At the root of the working directory. The schema is archived-post-status's, plus
     "gate": [ "critical", "error" ]
   },
   "js": {
-    "complexity": {
-      "max": { "cyclomatic": 10, "cognitive": 15 },
-      "gate": [ "cognitive" ]
-    }
+    "complexity": { "cyclomatic": 10, "cognitive": 15 }
   }
 }
 ```
 
 - `coverage.php` keys: `lines`, `methods`, `branches`. `coverage.js` keys: `statements`, `branches`, `functions`, `lines`. Every floor fails CI when breached (with `enforce: true`). A metric that was not measured (PHP branches under Xdebug, for example) never fails.
 - `metrics.max` lists the PHPMetrics values the report shows. Each is a ceiling. Supported keys: `critical`, `error`, `avgCyclomaticComplexityByClass`, `logicalLinesByMethod`, `lackCohesionOfMethods`, `avgEfferentCoupling`. Keys in `metrics.gate` fail CI when breached; the rest only mark the comment with ❌.
-- `js.complexity.max` holds per-function ceilings for `cyclomatic` and `cognitive` (defaults 10 and 15 when the block is absent). Keys in `js.complexity.gate` fail CI when the worst function exceeds the ceiling. With no `gate`, complexity is report-only.
+- Any block can be left out. `php-plugin.yml` reads only `coverage.php` and `metrics`, and `js.yml` reads only `coverage.js` and `js.complexity`, so a PHP-only repo needs no `js` keys.
+- `metrics.gate` compares each gated key against its own `metrics.max` ceiling, so a gate can be a non-zero ratchet (`"error": 4`).
+- `js.complexity` holds per-function ceilings: `{ "cyclomatic": 10, "cognitive": 15 }`. Every key given is gated: the job fails when the worst function exceeds it. To report a ceiling without gating it, use the long form `{ "max": { "cyclomatic": 10, "cognitive": 15 }, "gate": [ "cognitive" ] }`. With no block, the defaults (10 and 15) are reported and nothing is gated.
 - An unknown key is an error, not silently ignored, so a typo cannot quietly turn a gate off.
 - With `enforce: true` the file must exist; the job fails if it is missing.
 
@@ -215,6 +217,7 @@ jobs:
 | Input | Default | |
 | --- | --- | --- |
 | `php-versions` | `'["8.2", "8.3", "8.4", "8.5"]'` | JSON array for the lint matrix. |
+| `lint-composer-args` | `""` | Extra `composer install` arguments for the lint matrix only (see below). |
 | `quality-php-version` | `"8.4"` | PHP for quality, tests/coverage and metrics. |
 | `source-paths` | `"src/"` | Space-separated, relative to `working-directory`. The base branch's PHPMetrics run measures these. |
 | `coverage` | `true` | Run `phpunit:coverage-clover` and report coverage. `false` runs `phpunit` instead. |
@@ -224,6 +227,8 @@ jobs:
 | `working-directory` | `"."` | Directory holding `composer.json`. |
 | `ci-ref` | `"v1"` | Ref of this repo to load the report scripts from (see below). |
 
+Older PHP in the lint matrix: setup-php and php-parallel-lint (1.x) both run on PHP 7.4, so `php-versions: '["7.4", "8.0", "8.4"]'` works as long as `composer install` succeeds on each version. If the lock file pins tools that need a newer PHP (PHPUnit 10+, PHPStan 2), the 7.4 leg cannot install them. Either keep `config.platform.php` at the oldest supported version, or pass `lint-composer-args: "--ignore-platform-reqs"` so the lint legs install anyway; only `composer lint` runs there, so the tools that need newer PHP are never loaded. Make sure the lint script does not load `vendor/autoload.php` into the code under test.
+
 Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus `report-meta` (PRs only, no `needs`, so even a lint failure gets a comment saying so). Everything runs with `contents: read`.
 
 ### `js.yml`
@@ -232,7 +237,8 @@ Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus 
 | --- | --- | --- |
 | `node-version` | `"lts/*"` | For the repo's tests. |
 | `node-cache` | `"npm"` | `actions/setup-node` cache type; `""` disables it. |
-| `js-source-paths` | `"src/"` | Space-separated paths to measure complexity over. |
+| `js-source-paths` | `"src/"` | Space-separated paths the built-in complexity config measures (and the base fallback). |
+| `complexity-script` | `"lint:complexity"` | npm script that runs the repo's own ESLint. `""` always uses the built-in config. |
 | `coverage` | `true` | Run `npm run test:coverage`. |
 | `complexity` | `true` | Measure complexity with ESLint. |
 | `enforce` | `true` | Fail on breached coverage floors and gated complexity. |
@@ -343,7 +349,7 @@ Things that differ from the per-repo copies:
 - Base measurement tolerates a base branch without the scripts: the Base and Δ columns disappear and the section says so.
 - The coverage, metrics and complexity sections are uploaded even when tests or a gate fail, so a failing PR still gets its numbers.
 - `quality-thresholds.json` must exist when `enforce` is true.
-- JS complexity is new: add a `js.complexity` block to gate it, or leave it report-only.
+- JS complexity is new. Add `js.complexity` ceilings to gate it, or leave the block out to keep it report-only. With a `lint:complexity` npm script, your own `eslint.config.js` is used.
 
 ## Deviations from the shared spec
 
@@ -352,6 +358,7 @@ Things that differ from the per-repo copies:
 - **No bundling for `actions/render-report`.** It uses Node built-ins only, so `index.js` runs as-is (`using: node24`) with no `dist/` bundle to rebuild. The reusable workflows run the same file with `node … index.js <command>` from a fetch of this repo at `ci-ref`, not via `uses:`.
 - **Setup steps inlined.** The reusable workflows inline the three `actions/setup-php` steps instead of calling the action, for the same reason as `ci-ref`. The cache key also includes the PHP version, so repos that do not pin `config.platform.php` are safe.
 - **`php-quality` section.** The quality job also uploads a `php-quality` section (PHPCS / PHPStan / PHPMD outcomes), which the spec did not list.
+- **`js.complexity` long form.** Besides the flat `{ "cyclomatic": n, "cognitive": n }` ceilings (all gated), the `{ max, gate }` form is accepted, so a ceiling can be reported without failing CI.
 - **Sections on every event.** Sections are uploaded on push runs too (cheap, and the self-test merges them); `report-meta` is uploaded only for PRs, so `pr-report.yml` has nothing to post for pushes.
 
 ## Developing
