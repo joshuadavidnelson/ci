@@ -72,10 +72,10 @@ jobs:
             exit 1
           fi
           gh api "repos/$REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/run.json"
-          repo=$(jq -r '.repository.full_name' "$RUNNER_TEMP/run.json")
+          run_repo=$(jq -r '.repository.full_name' "$RUNNER_TEMP/run.json")
           event=$(jq -r '.event' "$RUNNER_TEMP/run.json")
-          if [ "$repo" != "$REPO" ]; then
-            echo "::error::Run $RUN_ID belongs to $repo, not $REPO."
+          if [ "$run_repo" != "$REPO" ]; then
+            echo "::error::Run $RUN_ID belongs to $run_repo, not $REPO."
             exit 1
           fi
           if [ "$event" != "pull_request" ]; then

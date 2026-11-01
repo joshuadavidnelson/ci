@@ -247,6 +247,7 @@ jobs:
         # PR comment explains what happened. The last step fails the job.
         continue-on-error: true
         run: |
+          mkdir -p coverage
           composer run phpunit:coverage-clover
           test -s coverage/php-clover.xml || {
             echo "::error::composer phpunit:coverage-clover did not write coverage/php-clover.xml"
@@ -280,6 +281,7 @@ jobs:
           fi
           cd "$base"
           composer install --no-progress --no-interaction
+          mkdir -p coverage
           composer run phpunit:coverage-clover
 
       - name: "Build report section"
@@ -376,6 +378,8 @@ jobs:
         id: head
         continue-on-error: true
         run: |
+          # PHPMetrics will not create the report directory itself.
+          mkdir -p reports
           composer run phpmetrics-summary
           test -s reports/metrics-summary.json || {
             echo "::error::composer phpmetrics-summary did not write reports/metrics-summary.json"
@@ -410,6 +414,7 @@ jobs:
             exit 0
           fi
           joined=$(IFS=,; echo "${paths[*]}")
+          mkdir -p reports
           php -d error_reporting='E_ALL & ~E_DEPRECATED' ./vendor/bin/phpmetrics \
             --composer=false --report-summary-json=reports/base-summary.json "$joined"
 
