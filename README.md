@@ -37,11 +37,11 @@ A repository that calls these workflows provides the following.
 | `phpcs` | quality | yes |
 | `phpstan` | quality | yes |
 | `phpmd` | quality | no: skipped when the script is absent |
-| `phpunit` | tests, when `coverage: false` | when `coverage: false` |
-| `phpunit:coverage-clover` | tests, when `coverage: true`; must write `coverage/php-clover.xml` | when `coverage: true` |
+| `phpunit` | tests, when `coverage: false` | when `coverage: false` and the repo has a suite |
+| `phpunit:coverage-clover` | tests, when `coverage: true`; must write `coverage/php-clover.xml` | when `coverage: true` and the repo has a suite |
 | `phpmetrics-summary` | metrics; must write `reports/metrics-summary.json` | when `metrics: true` |
 
-The coverage job installs Xdebug. If the script sets `-dxdebug.mode=coverage` (as archived-post-status does), nothing else is needed. The PHPMetrics `phpmetrics-summary` script should measure the same directories as the `source-paths` input, because `source-paths` is what the base branch is measured over.
+A repo without a suite yet (no `phpunit.xml` / `phpunit.xml.dist`, or no script for the mode in use) gets its tests job skipped with a notice, or a warning when `coverage: true`, since the floors then go unchecked. `tests: false` skips the job explicitly. The coverage job installs Xdebug. If the script sets `-dxdebug.mode=coverage` (as archived-post-status does), nothing else is needed. The PHPMetrics `phpmetrics-summary` script should measure the same directories as the `source-paths` input, because `source-paths` is what the base branch is measured over.
 
 ### npm scripts (JS, only if the repo calls `js.yml`)
 
@@ -208,7 +208,7 @@ jobs:
       pull-requests: write
 ```
 
-`wp-deploy.yml` runs its deploy job in the `wordpress-org` environment (input `environment`). Give that environment a required reviewer. The SVN secrets can be repository secrets passed with `secrets: inherit` or environment secrets on `wordpress-org`; the environment's take precedence.
+`wp-deploy.yml` runs its deploy job in the `wordpress-org` environment (input `environment`). Give that environment a required reviewer **before the first tag**: if it does not exist, GitHub creates it on the first run with no protection rules, so that deploy goes straight to SVN without waiting for approval (the verify job's green-CI check still applies). An auto-created environment also has no environment secrets, so the SVN credentials must then come from repository secrets via `secrets: inherit`. The SVN secrets can be repository secrets passed with `secrets: inherit` or environment secrets on `wordpress-org`; the environment's take precedence.
 
 ## Inputs
 
@@ -220,6 +220,7 @@ jobs:
 | `lint-composer-args` | `""` | Extra `composer install` arguments for the lint matrix only (see below). |
 | `quality-php-version` | `"8.4"` | PHP for quality, tests/coverage and metrics. |
 | `source-paths` | `"src/"` | Space-separated, relative to `working-directory`. The base branch's PHPMetrics run measures these. |
+| `tests` | `true` | Run the PHPUnit job. It also skips itself when there is no suite (see the contract). |
 | `coverage` | `true` | Run `phpunit:coverage-clover` and report coverage. `false` runs `phpunit` instead. |
 | `metrics` | `true` | Run PHPMetrics on head and base. |
 | `enforce` | `true` | Fail on breached coverage floors and gated metrics. |

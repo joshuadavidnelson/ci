@@ -26,6 +26,10 @@ on:
         description: "Space-separated source paths, relative to working-directory. Used to measure the base branch."
         type: string
         default: "src/"
+      tests:
+        description: "Run the PHPUnit job. It also skips itself, with a notice, when the repo has no phpunit.xml(.dist) or no script for the mode in use."
+        type: boolean
+        default: true
       coverage:
         description: "Collect clover coverage (composer phpunit:coverage-clover). When false, runs composer phpunit instead."
         type: boolean
@@ -198,6 +202,7 @@ jobs:
 
   tests:
     name: ${{ inputs.coverage && 'Tests & coverage' || 'Tests' }}
+    if: inputs.tests
     needs: quality
     runs-on: ubuntu-latest
     defaults:
@@ -209,7 +214,40 @@ jobs:
         with:
           persist-credentials: false
 
+      # A repo with no suite yet (no phpunit.xml(.dist), or no script for
+      # the mode in use) skips the rest of the job rather than failing it.
+      - name: "Detect the test suite"
+        id: suite
+        env:
+          COVERAGE: ${{ inputs.coverage }}
+        run: |
+          script=phpunit
+          if [ "$COVERAGE" = "true" ]; then
+            script="phpunit:coverage-clover"
+          fi
+          missing=""
+          if [ ! -f phpunit.xml ] && [ ! -f phpunit.xml.dist ]; then
+            missing="no phpunit.xml or phpunit.xml.dist"
+          elif ! jq -e --arg s "$script" '.scripts[$s]' composer.json > /dev/null; then
+            missing="no '$script' composer script"
+          fi
+          if [ -n "$missing" ]; then
+            level=notice
+            if [ "$COVERAGE" = "true" ]; then
+              # Coverage was asked for, so its floors go unchecked: say so
+              # louder than a notice. tests: false skips the job silently.
+              level=warning
+            fi
+            echo "::$level::Skipping tests: $missing in $WORKDIR. Set tests: false on the caller to skip this job explicitly."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "coverage=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "coverage=$COVERAGE" >> "$GITHUB_OUTPUT"
+
       - name: "Fetch CI tooling"
+        if: steps.suite.outputs.run == 'true'
         working-directory: "."
         env:
           CI_REF: ${{ inputs.ci-ref }}
@@ -221,12 +259,14 @@ jobs:
           echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
 
       - name: "Install PHP"
+        if: steps.suite.outputs.run == 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ inputs.quality-php-version }}
           coverage: ${{ inputs.coverage && 'xdebug' || 'none' }}
 
       - name: "Cache Composer dependencies"
+        if: steps.suite.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ inputs.working-directory }}/vendor
@@ -234,15 +274,16 @@ jobs:
           restore-keys: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-
 
       - name: "Install Composer dependencies"
+        if: steps.suite.outputs.run == 'true'
         run: composer install --no-progress --no-interaction
 
       - name: "Run tests"
-        if: ${{ ! inputs.coverage }}
+        if: steps.suite.outputs.run == 'true' && steps.suite.outputs.coverage != 'true'
         run: composer run phpunit
 
       - name: "Run tests with coverage"
         id: tests
-        if: inputs.coverage
+        if: steps.suite.outputs.coverage == 'true'
         # The report and the floor check still run when tests fail, so the
         # PR comment explains what happened. The last step fails the job.
         continue-on-error: true
@@ -258,7 +299,7 @@ jobs:
       # does not yet carry the coverage script (or this directory) is
       # expected: the report drops the Base and Δ columns and says so.
       - name: "Checkout base branch"
-        if: inputs.coverage && github.event_name == 'pull_request'
+        if: steps.suite.outputs.coverage == 'true' && github.event_name == 'pull_request'
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -266,7 +307,7 @@ jobs:
           persist-credentials: false
 
       - name: "Measure base branch coverage"
-        if: inputs.coverage && github.event_name == 'pull_request'
+        if: steps.suite.outputs.coverage == 'true' && github.event_name == 'pull_request'
         continue-on-error: true
         working-directory: "."
         run: |
@@ -285,7 +326,7 @@ jobs:
           composer run phpunit:coverage-clover
 
       - name: "Build report section"
-        if: always() && inputs.coverage && steps.tests.outcome != 'skipped'
+        if: always() && steps.suite.outputs.coverage == 'true' && steps.tests.outcome != 'skipped'
         env:
           THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
@@ -296,7 +337,7 @@ jobs:
             --output "$RUNNER_TEMP/sections/php-coverage.json"
 
       - name: "Upload report section"
-        if: always() && inputs.coverage
+        if: always() && steps.suite.outputs.coverage == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: report-section-php-coverage
@@ -305,7 +346,7 @@ jobs:
           retention-days: 14
 
       - name: "Upload coverage report"
-        if: always() && inputs.coverage
+        if: always() && steps.suite.outputs.coverage == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: php-coverage
@@ -314,7 +355,7 @@ jobs:
           retention-days: 14
 
       - name: "Require the thresholds file"
-        if: inputs.coverage && inputs.enforce
+        if: steps.suite.outputs.coverage == 'true' && inputs.enforce
         env:
           THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
@@ -324,7 +365,7 @@ jobs:
           }
 
       - name: "Enforce coverage floors"
-        if: inputs.coverage && inputs.enforce
+        if: steps.suite.outputs.coverage == 'true' && inputs.enforce
         run: node "$CI_TOOLS/actions/render-report/index.js" enforce --section "$RUNNER_TEMP/sections/php-coverage.json"
 
       - name: "Fail if the tests failed"
