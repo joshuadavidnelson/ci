@@ -139,7 +139,7 @@ jobs:
 
       - name: "Upload report section"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-section-js-coverage
           path: ${{ runner.temp }}/sections/js-coverage.json
@@ -148,7 +148,7 @@ jobs:
 
       - name: "Upload coverage summary"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: js-coverage
           path: ${{ inputs.working-directory }}/coverage/coverage-summary.json
@@ -262,7 +262,7 @@ jobs:
 
       - name: "Upload report section"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-section-js-complexity
           path: ${{ runner.temp }}/sections/js-complexity.json
@@ -298,7 +298,7 @@ jobs:
       # Its own name, so a caller running php-plugin.yml and js.yml in the
       # same workflow does not upload two artifacts called report-meta.
       - name: "Upload report-meta-js"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-meta-js
           path: ${{ runner.temp }}/meta/meta.json
