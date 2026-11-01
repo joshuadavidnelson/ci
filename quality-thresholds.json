@@ -1,0 +1,17 @@
+{
+  "_comment": "This repository's own thresholds, used when its Self-test dogfoods js.yml on actions/ and tools/. Coverage floors sit a few points under the current numbers. The complexity ceilings are a ratchet at today's worst functions (buildComplexitySection, analyseMetrics, renderReport): they stop it getting worse; lower them as those functions are split up.",
+  "coverage": {
+    "js": {
+      "statements": 92,
+      "branches": 85,
+      "functions": 92,
+      "lines": 92
+    }
+  },
+  "js": {
+    "complexity": {
+      "cyclomatic": 40,
+      "cognitive": 56
+    }
+  }
+}

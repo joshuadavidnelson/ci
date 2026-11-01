@@ -1,10 +1,16 @@
 name: "Self-test"
 
-# CI for this repository: lint the workflows, run the renderer's Jest
-# suite, and run the reusable workflows against the fixtures under
-# test/fixtures/, loading the report scripts from this very commit.
-# On a PR, self-test-report.yml then posts the merged report, so the
-# workflow_run comment path is exercised here too.
+# CI for this repository:
+#   - actionlint and the Jest suite, always;
+#   - dogfood: js.yml on this repo's own Node code (actions/, tools/), with
+#     the thresholds in ./quality-thresholds.json. Its sections are this
+#     repo's PR report;
+#   - fixtures: php-plugin.yml and js.yml against test/fixtures/, but only
+#     when a PR touches the reusable workflows, actions/ or the fixtures
+#     (always on push). Their sections are prefixed "fixture-", so they only
+#     appear in the PR report when they are relevant to the PR.
+# Everything loads the report scripts from this very commit. On a PR,
+# self-test-report.yml then posts the merged report.
 
 on:
   pull_request: null
@@ -21,6 +27,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: "Detect fixture-relevant changes"
+    runs-on: ubuntu-latest
+    outputs:
+      fixtures: ${{ steps.gate.outputs.run || 'true' }}
+    steps:
+      - name: "Checkout"
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: "Match changed files"
+        id: gate
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          node actions/render-report/index.js changes --files "$RUNNER_TEMP/changed.txt" --paths '
+            .github/workflows/php-plugin.yml
+            .github/workflows/js.yml
+            .github/workflows/pr-report.yml
+            .github/workflows/self-test.yml
+            actions/**
+            tools/**
+            test/fixtures/**
+          '
+
   actionlint:
     name: "actionlint"
     runs-on: ubuntu-latest
@@ -66,8 +100,18 @@ jobs:
       - name: "Check the complexity toolchain installs from its lock file"
         run: npm ci --prefix tools/js-complexity --no-audit --no-fund
 
+  dogfood:
+    name: "js.yml (this repo)"
+    uses: ./.github/workflows/js.yml
+    with:
+      js-source-paths: "actions tools/js-complexity"
+      complexity-script: ""
+      ci-ref: ${{ github.sha }}
+
   php-fixture:
-    name: "php-plugin.yml"
+    name: "php-plugin.yml (fixture)"
+    needs: changes
+    if: needs.changes.outputs.fixtures == 'true'
     uses: ./.github/workflows/php-plugin.yml
     with:
       working-directory: test/fixtures/php-plugin
@@ -76,14 +120,23 @@ jobs:
       # standalone parallel-lint instead of the project's vendor/.
       php-versions: '["7.4", "8.2", "8.4"]'
       lint-standalone: true
+      # Gated by the changes job above, so the inner path gate is opened.
+      paths: "**"
+      report-id-prefix: "fixture-"
+      report-title-prefix: "Fixture: "
       ci-ref: ${{ github.sha }}
 
   js-fixture:
-    name: "js.yml"
+    name: "js.yml (fixture)"
+    needs: changes
+    if: needs.changes.outputs.fixtures == 'true'
     uses: ./.github/workflows/js.yml
     with:
       working-directory: test/fixtures/js-package
       js-source-paths: "src/"
+      paths: "**"
+      report-id-prefix: "fixture-"
+      report-title-prefix: "Fixture: "
       ci-ref: ${{ github.sha }}
 
   # Merges the sections the fixture runs uploaded, the way pr-report.yml
@@ -91,7 +144,7 @@ jobs:
   # section to have arrived and passed.
   render-smoke:
     name: "Render smoke test"
-    needs: [php-fixture, js-fixture]
+    needs: [dogfood, php-fixture, js-fixture]
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
@@ -124,7 +177,7 @@ jobs:
       - name: "Require every fixture section to pass"
         run: |
           for id in php-quality php-coverage php-metrics js-coverage js-complexity; do
-            file="$RUNNER_TEMP/report/report-section-$id/$id.json"
+            file="$RUNNER_TEMP/report/report-section-fixture-$id/$id.json"
             jq -e '.status == "pass"' "$file" > /dev/null || {
               echo "::error::Section $id is missing or did not pass."
               exit 1
@@ -133,7 +186,7 @@ jobs:
           # The JS fixture must be measured through its own lint:complexity
           # config; a silent fallback to the built-in one is a failure here.
           jq -e '.summary | test("repo.s own ESLint config")' \
-            "$RUNNER_TEMP/report/report-section-js-complexity/js-complexity.json" > /dev/null || {
+            "$RUNNER_TEMP/report/report-section-fixture-js-complexity/js-complexity.json" > /dev/null || {
             echo "::error::js-complexity fell back to the built-in config instead of the fixture's lint:complexity."
             exit 1
           }

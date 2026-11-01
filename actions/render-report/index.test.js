@@ -259,7 +259,30 @@ describe( 'read-meta and merge', () => {
 		expect( body ).toContain( '`bbbbbbb` (base) → `aaaaaaa` (PR)' );
 	} );
 
-	it( 'rejects a section whose id does not match its artifact name, and says so', () => {
+	it( 'posts nothing, and says so, when every section is empty', () => {
+		write( 'art/report-section-php-coverage/php-coverage.json', section( 'php-coverage', { empty: true } ) );
+		write( 'art/report-section-js-coverage/js-coverage.json', section( 'js-coverage', { empty: true } ) );
+		write( 'gh', '' );
+
+		expect( main( {
+			argv: [ 'merge', '--dir', at( 'art' ), '--head-sha', HEAD_SHA, '--run-url', RUN_URL, '--output', at( 'report.md' ) ],
+			env: { GITHUB_OUTPUT: at( 'gh' ) },
+			log: quiet(),
+		} ) ).toBe( true );
+		expect( fs.existsSync( at( 'report.md' ) ) ).toBe( false );
+		expect( fs.readFileSync( at( 'gh' ), 'utf8' ) ).toContain( 'post=false' );
+	} );
+
+	it( 'posts nothing when there are no section artifacts at all', () => {
+		fs.rmSync( at( 'art/report-section-php-coverage' ), { recursive: true } );
+		fs.rmSync( at( 'art/report-section-js-coverage' ), { recursive: true } );
+		write( 'gh', '' );
+
+		expect( main( { argv: [ 'merge', '--dir', at( 'art' ), '--head-sha', HEAD_SHA, '--run-url', RUN_URL, '--output', at( 'report.md' ) ], env: { GITHUB_OUTPUT: at( 'gh' ) }, log: quiet() } ) ).toBe( true );
+		expect( fs.readFileSync( at( 'gh' ), 'utf8' ) ).toContain( 'post=false' );
+	} );
+
+		it( 'rejects a section whose id does not match its artifact name, and says so', () => {
 		write( 'art/report-section-php-metrics/x.json', section( 'php-coverage' ) );
 
 		expect( merge() ).toBe( true );
@@ -292,5 +315,30 @@ describe( 'read-meta and merge', () => {
 	it( 'drops the comparison when the base SHA is not well-formed', () => {
 		expect( merge( [ '--base-sha', 'nope' ] ) ).toBe( true );
 		expect( fs.readFileSync( at( 'report.md' ), 'utf8' ) ).not.toContain( '(base) →' );
+	} );
+} );
+
+describe( 'changes', () => {
+	const run = ( files, paths, always = '' ) => {
+		write( 'files.txt', files.join( '\n' ) );
+		write( 'gh', '' );
+		const log = quiet();
+		const ok = main( { argv: [ 'changes', '--files', at( 'files.txt' ), '--paths', paths, '--always', always ], env: { GITHUB_OUTPUT: at( 'gh' ) }, log } );
+		return { ok, output: fs.readFileSync( at( 'gh' ), 'utf8' ), log };
+	};
+
+	it( 'outputs run=true when a changed file matches', () => {
+		expect( run( [ 'readme.txt', 'src/A.php' ], '**/*.php\ncomposer.json' ).output ).toBe( 'run=true\n' );
+	} );
+
+	it( 'outputs run=false, with a notice, when nothing matches', () => {
+		const { output, log } = run( [ 'readme.txt' ], '**/*.php' );
+
+		expect( output ).toBe( 'run=false\n' );
+		expect( log.info ).toHaveBeenCalledWith( expect.stringContaining( '::notice::' ) );
+	} );
+
+	it( 'always runs when the caller workflow changed', () => {
+		expect( run( [ '.github/workflows/integrate.yml' ], '**/*.php', '.github/workflows/integrate.yml' ).output ).toBe( 'run=true\n' );
 	} );
 } );

@@ -12,6 +12,7 @@
  *     "rows": { "columns": [ … ], "rows": [ [ … ] ], "align": [ "left" | "right" ] },  // … or a table
  *     "summary": "…",                  // optional line above a rows table
  *     "baseline": true,                // optional: compared against the base branch
+ *     "empty": true,                   // optional: no data; enforced, never rendered
  *     "failures": [ "…" ]              // optional: enforcement messages, never rendered
  *   }
  *
@@ -166,6 +167,9 @@ function parseSection( raw, source = 'section' ) {
 	}
 
 	const section = { id: data.id, title: data.title, status: data.status, baseline: data.baseline === true };
+	if ( data.empty === true ) {
+		section.empty = true;
+	}
 
 	if ( hasMarkdown ) {
 		section.markdown = data.markdown;
@@ -250,8 +254,9 @@ function renderSectionBody( section ) {
  * @return {Object[]} A sorted copy.
  */
 function sortSections( sections ) {
+	// A prefixed id (e.g. "fixture-php-coverage") sorts with its base id.
 	const position = ( id ) => {
-		const index = ORDER.indexOf( id );
+		const index = ORDER.findIndex( ( known ) => id === known || id.endsWith( `-${ known }` ) );
 		return index === -1 ? ORDER.length : index;
 	};
 	return [ ...sections ].sort( ( a, b ) => position( a.id ) - position( b.id ) || a.id.localeCompare( b.id ) );
@@ -271,6 +276,19 @@ function overallStatus( sections ) {
 }
 
 /**
+ * The sections worth showing: those that carry data.
+ *
+ * An empty section (its tool produced nothing, or measured nothing) still
+ * counts for enforcement, but a table of "n/a" in the comment helps nobody.
+ *
+ * @param {Object[]} sections Validated sections.
+ * @return {Object[]} The non-empty ones.
+ */
+function reportable( sections ) {
+	return sections.filter( ( s ) => ! s.empty );
+}
+
+/**
  * Merges an arbitrary set of sections into the one PR comment.
  *
  * @param {Object}   input             Render input.
@@ -284,7 +302,7 @@ function overallStatus( sections ) {
  * @return {string} Markdown body.
  */
 function renderReport( { sections, rejected = [], headSha, baseSha = '', runUrl, runName = 'CI', conclusion = '' } ) {
-	const sorted = sortSections( sections );
+	const sorted = sortSections( reportable( sections ) );
 	const shortHead = String( headSha ).slice( 0, 7 );
 	const shortBase = String( baseSha ).slice( 0, 7 );
 
@@ -382,5 +400,6 @@ module.exports = {
 	sortSections,
 	overallStatus,
 	renderReport,
+	reportable,
 	parseMeta,
 };

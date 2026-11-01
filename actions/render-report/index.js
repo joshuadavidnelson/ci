@@ -16,6 +16,7 @@
  *   enforce        section JSON(s)   → exit 1 when any has status "fail"
  *   read-meta      artifact dir      → pr-number output
  *   merge          artifact dir      → comment markdown
+ *   changes        changed-file list → run output (path gate)
  *
  * Node built-ins only, so there is nothing to install or bundle.
  */
@@ -28,7 +29,8 @@ const path = require( 'path' );
 const { parseClover, parseJestSummary } = require( './src/coverage' );
 const { buildCoverageSection, buildMetricsSection } = require( './src/render-pr-report' );
 const { buildComplexitySection } = require( './src/complexity' );
-const { parseSection, renderReport, parseMeta, LIMITS } = require( './src/sections' );
+const { parseSection, renderReport, reportable, parseMeta, LIMITS } = require( './src/sections' );
+const { parsePatterns, matchChanges } = require( './src/paths' );
 
 /**
  * Reads options from `--key value` flags, falling back to INPUT_* env vars.
@@ -288,6 +290,23 @@ const COMMANDS = {
 		return ok;
 	},
 
+	changes( get, env, log ) {
+		const files = fs.readFileSync( get( 'files' ), 'utf8' ).split( /\r?\n/ ).filter( Boolean );
+		// The caller's own workflow file always counts: changing how CI runs
+		// must run CI.
+		const patterns = [ ...parsePatterns( get( 'paths' ) ), ...parsePatterns( get( 'always' ) ) ];
+		const { matched, files: hits } = matchChanges( files, patterns );
+		log.info( `${ files.length } changed file(s); ${ hits.length } match the paths.` );
+		for ( const hit of hits.slice( 0, 20 ) ) {
+			log.info( `  ${ hit }` );
+		}
+		if ( ! matched ) {
+			log.info( '::notice::No changes match this workflow\'s paths, so its jobs are skipped.' );
+		}
+		setOutput( env, 'run', matched ? 'true' : 'false' );
+		return true;
+	},
+
 	'read-meta'( get, env ) {
 		const raws = artifactFiles( get( 'dir' ) )
 			.filter( ( { artifact } ) => /^report-meta(-[a-z0-9-]+)?$/.test( artifact ) )
@@ -332,6 +351,14 @@ const COMMANDS = {
 			throw new Error( 'merge: run-url must be a GitHub Actions run URL' );
 		}
 
+		// Nothing to show: no comment at all. The caller deletes a stale one.
+		if ( ! reportable( sections ).length && ! rejected.length ) {
+			setOutput( env, 'post', 'false' );
+			setOutput( env, 'sections', 0 );
+			log.info( 'No non-empty sections: nothing to post.' );
+			return true;
+		}
+
 		const markdown = renderReport( {
 			sections,
 			rejected,
@@ -345,7 +372,8 @@ const COMMANDS = {
 		const output = get( 'output', 'pr-report.md' );
 		fs.writeFileSync( output, markdown );
 		setOutput( env, 'path', output );
-		setOutput( env, 'sections', sections.length );
+		setOutput( env, 'post', 'true' );
+		setOutput( env, 'sections', reportable( sections ).length );
 		log.info( `Merged ${ sections.length } section(s) into ${ output }` );
 		return markdown;
 	},

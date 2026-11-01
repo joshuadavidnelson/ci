@@ -162,7 +162,15 @@ describe( 'buildComplexitySection', () => {
 		expect( buildComplexitySection( { head, thresholds } ).summary ).not.toMatch( /Measured with/ );
 	} );
 
-	it( 'fails when ESLint produced nothing', () => {
+	it( 'is empty when ESLint scored no function', () => {
+		expect( buildComplexitySection( { head: [ result( 'a.js', [] ) ], thresholds } ) ).toMatchObject( { status: 'pass', empty: true } );
+	} );
+
+	it( 'is not empty when files failed to parse, so the warning shows', () => {
+		expect( buildComplexitySection( { head: [ result( 'a.js', [ { fatal: true, message: 'x' } ] ) ], thresholds } ).empty ).toBeUndefined();
+	} );
+
+		it( 'fails when ESLint produced nothing', () => {
 		expect( buildComplexitySection( { head: null, thresholds } ).status ).toBe( 'fail' );
 	} );
 } );

@@ -174,6 +174,7 @@ function buildComplexitySection( { head, base, thresholds, root = '', baseRoot =
 			id,
 			title,
 			status: 'fail',
+			empty: true,
 			markdown: 'ESLint produced no output for this branch, so complexity could not be measured. See the run log.',
 			failures: [ 'ESLint produced no complexity output for the PR branch' ],
 		};
@@ -270,6 +271,8 @@ function buildComplexitySection( { head, base, thresholds, root = '', baseRoot =
 		title,
 		status,
 		baseline: comparable,
+		// No function was scored and nothing failed to parse: nothing to show.
+		...( now.functions === 0 && ! parsedHead.parseErrors ? { empty: true } : {} ),
 		...( summaryParts.length ? { summary: summaryParts.join( ' ' ) } : {} ),
 		rows: comparable
 			? { columns: [ 'Metric', 'Base', 'PR', 'Δ', 'Max' ], align: [ 'left', 'right', 'right', 'right', 'right' ], rows }

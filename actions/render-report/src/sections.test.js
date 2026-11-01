@@ -112,7 +112,12 @@ describe( 'parseSection', () => {
 		expect( () => parse( { markdown: undefined, rows: { columns: [ 'a' ], rows } } ) ).toThrow( /more than/ );
 	} );
 
-	it( 'only treats a literal true as a baseline', () => {
+	it( 'keeps a literal true empty flag only', () => {
+		expect( parse( { empty: true } ).empty ).toBe( true );
+		expect( parse( { empty: 'yes' } ).empty ).toBeUndefined();
+	} );
+
+		it( 'only treats a literal true as a baseline', () => {
 		expect( parse( { baseline: 'yes' } ).baseline ).toBe( false );
 		expect( parse( { baseline: true } ).baseline ).toBe( true );
 	} );
@@ -213,7 +218,20 @@ describe( 'renderReport', () => {
 		expect( body ).toContain( '_No rows._' );
 	} );
 
-	it( 'never renders failures, which are for the enforcement step only', () => {
+	it( 'leaves out empty sections, even failing ones', () => {
+		const body = render( { sections: [ ...sections, parse( { id: 'js-coverage', title: 'JS coverage', status: 'fail', empty: true } ) ] } );
+
+		expect( body ).not.toContain( 'JS coverage' );
+		expect( body ).toContain( '⚠️ Nothing failed' );
+	} );
+
+	it( 'sorts a prefixed id with its base id', () => {
+		const ids = sortSections( [ { id: 'fixture-php-metrics' }, { id: 'zeta' }, { id: 'fixture-php-coverage' }, { id: 'js-coverage' } ] ).map( ( s ) => s.id );
+
+		expect( ids ).toEqual( [ 'fixture-php-coverage', 'js-coverage', 'fixture-php-metrics', 'zeta' ] );
+	} );
+
+		it( 'never renders failures, which are for the enforcement step only', () => {
 		expect( render( { sections: [ parse( { failures: [ 'SECRET-ish detail' ] } ) ] } ) ).not.toContain( 'SECRET-ish' );
 	} );
 
