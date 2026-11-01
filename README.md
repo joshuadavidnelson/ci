@@ -258,7 +258,7 @@ The caller grants `pull-requests: write` and `actions: read`. No secrets.
 
 ### `wp-deploy.yml`, `wp-readme-deploy.yml`, `cs-fixer.yml`
 
-- `wp-deploy.yml`: `slug` (required), `required-workflows` (newline list, default `Integrate`), `environment` (default `wordpress-org`), `build-dir`, `dry-run`. Secrets `SVN_USERNAME`, `SVN_PASSWORD`.
+- `wp-deploy.yml`: `slug` (required), `required-workflows` (newline list, default `Integrate`), `environment` (default `wordpress-org`), `build-dir`, `dry-run`. Secrets `SVN_USERNAME`, `SVN_PASSWORD`. `required-workflows` can only list workflows that run on the tagged commit itself, which in practice means workflows triggered by `push` to the branch you tag from. A PR-only workflow (E2E on `pull_request`, say) never runs on that commit, so listing it would block every deploy with "never ran on this commit".
 - `wp-readme-deploy.yml`: `slug` (required), `assets-dir` (default `.wordpress-org`), `ignore-other-files` (default `true`). Secrets `SVN_USERNAME`, `SVN_PASSWORD` (required).
 - `cs-fixer.yml`: `php-version` (default `8.4`, keep it equal to `quality-php-version`), `working-directory`, `add-paths` (default `*.php`), `branch` (default `cs-fixer`).
 

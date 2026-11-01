@@ -71,7 +71,11 @@ jobs:
     uses: ./.github/workflows/php-plugin.yml
     with:
       working-directory: test/fixtures/php-plugin
-      php-versions: '["8.2", "8.4"]'
+      # 7.4 proves the lint leg for repos supporting older PHP than their
+      # dev tools: the lock targets 8.2, so the lint legs install with
+      # --ignore-platform-reqs and only parallel-lint runs there.
+      php-versions: '["7.4", "8.2", "8.4"]'
+      lint-composer-args: "--ignore-platform-reqs"
       ci-ref: ${{ github.sha }}
 
   js-fixture:

@@ -6,11 +6,16 @@ namespace CiFixture;
 
 /**
  * Formats the archived label shown beside a post title.
+ *
+ * Kept to PHP 7.4 syntax: the self-test lints this fixture on 7.4.
  */
 final class Label
 {
-    public function __construct(private string $text = 'Archived')
+    private string $text;
+
+    public function __construct(string $text = 'Archived')
     {
+        $this->text = $text;
     }
 
     public function forTitle(string $title, bool $archived): string
