@@ -1,0 +1,197 @@
+name: "PR report"
+
+# Reusable: posts the ONE sticky PR comment (header `ci-report`) built from
+# the report-section artifacts of a finished CI run. Call it from a
+# workflow_run workflow so fork PRs get comments too:
+#
+#   on:
+#     workflow_run:
+#       workflows: [Integrate]
+#       types: [completed]
+#   permissions:
+#     pull-requests: write
+#     actions: read
+#   jobs:
+#     report:
+#       uses: joshuadavidnelson/ci/.github/workflows/pr-report.yml@v1
+#
+# It runs with a write token on input a fork can control, so:
+#   - it never checks out or runs the PR's code (only this repo's scripts,
+#     fetched at `ci-ref`);
+#   - artifact contents are untrusted data: sizes and counts are capped
+#     before download, zip entries are checked before extraction, JSON is
+#     validated, and every string is escaped before it reaches the comment;
+#   - the PR number from report-meta is only a pointer: the PR's head SHA
+#     must equal the run's head SHA, from the API, before anything posts;
+#   - it needs no secrets, only the caller's GITHUB_TOKEN.
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        description: "ID of the CI run to report on. Defaults to the triggering workflow_run."
+        type: string
+        default: ""
+      ci-ref:
+        description: "Ref of joshuadavidnelson/ci to load the renderer from."
+        type: string
+        default: "v1"
+
+permissions: {}
+
+jobs:
+  comment:
+    name: "Post the PR report"
+    # Only pull_request runs have a PR to comment on; push runs end here.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run-id || github.event.workflow_run.id }}
+    steps:
+      - name: "Fetch CI tooling"
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 https://github.com/joshuadavidnelson/ci "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      # Everything about the run comes from the API, not from the artifacts.
+      - name: "Look up the run"
+        id: run
+        run: |
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::run-id must be numeric."
+            exit 1
+          fi
+          gh api "repos/$REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/run.json"
+          repo=$(jq -r '.repository.full_name' "$RUNNER_TEMP/run.json")
+          event=$(jq -r '.event' "$RUNNER_TEMP/run.json")
+          if [ "$repo" != "$REPO" ]; then
+            echo "::error::Run $RUN_ID belongs to $repo, not $REPO."
+            exit 1
+          fi
+          if [ "$event" != "pull_request" ]; then
+            echo "::notice::Run $RUN_ID was triggered by $event, not pull_request. Nothing to report."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "skip=false"
+            echo "head-sha=$(jq -r '.head_sha' "$RUNNER_TEMP/run.json")"
+            echo "html-url=$(jq -r '.html_url' "$RUNNER_TEMP/run.json")"
+            echo "conclusion=$(jq -r '.conclusion // ""' "$RUNNER_TEMP/run.json")"
+          } >> "$GITHUB_OUTPUT"
+          jq -r '"name=" + (.name | gsub("[\r\n]"; " "))' "$RUNNER_TEMP/run.json" >> "$GITHUB_OUTPUT"
+
+      - name: "Download report artifacts"
+        if: steps.run.outputs.skip == 'false'
+        id: download
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/report"
+          mkdir -p "$dest"
+          gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | [.id, .name, .size_in_bytes] | @tsv' > "$RUNNER_TEMP/artifacts.tsv"
+
+          count=0
+          while IFS=$'\t' read -r id name size; do
+            [[ "$name" =~ ^report-(section-[a-z0-9-]+|meta(-[a-z0-9-]+)?)$ ]] || continue
+            count=$((count + 1))
+            if [ "$count" -gt 25 ]; then
+              echo "::warning::More than 25 report artifacts; ignoring the rest."
+              break
+            fi
+            if [ "$size" -gt 262144 ]; then
+              echo "::warning::Skipping $name: $size bytes is over the 256 KiB limit."
+              continue
+            fi
+            [[ "$id" =~ ^[0-9]+$ ]] || continue
+
+            zip="$RUNNER_TEMP/$id.zip"
+            gh api "repos/$REPO/actions/artifacts/$id/zip" > "$zip"
+
+            # Check the entries before extracting: flat names only, at most
+            # 5 files, at most 256 KiB uncompressed in total.
+            listing=$(unzip -Z1 "$zip")
+            entries=$(printf '%s\n' "$listing" | grep -c . || true)
+            total=$(unzip -l "$zip" | tail -n 1 | awk '{print $1}')
+            if [ "$entries" -gt 5 ] || [ "${total:-0}" -gt 262144 ] || printf '%s\n' "$listing" | grep -qv '^[A-Za-z0-9._-]\+$'; then
+              echo "::warning::Skipping $name: unexpected contents."
+              continue
+            fi
+            mkdir -p "$dest/$name"
+            unzip -q -o "$zip" -d "$dest/$name"
+          done < "$RUNNER_TEMP/artifacts.tsv"
+
+          echo "dir=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: "Read the PR number"
+        if: steps.run.outputs.skip == 'false'
+        id: meta
+        continue-on-error: true
+        run: node "$CI_TOOLS/actions/render-report/index.js" read-meta --dir "${{ steps.download.outputs.dir }}"
+
+      - name: "Confirm the PR belongs to this run"
+        if: steps.run.outputs.skip == 'false' && steps.meta.outputs.pr-number != ''
+        id: pr
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.pr-number }}
+          HEAD_SHA: ${{ steps.run.outputs.head-sha }}
+        run: |
+          gh api "repos/$REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          pr_head=$(jq -r '.head.sha' "$RUNNER_TEMP/pr.json")
+          pr_repo=$(jq -r '.base.repo.full_name' "$RUNNER_TEMP/pr.json")
+          state=$(jq -r '.state' "$RUNNER_TEMP/pr.json")
+          if [ "$pr_repo" != "$REPO" ]; then
+            echo "::error::PR #$PR_NUMBER is not a PR against $REPO."
+            exit 1
+          fi
+          if [ "$pr_head" != "$HEAD_SHA" ]; then
+            echo "::notice::PR #$PR_NUMBER has moved on to $pr_head since run $RUN_ID ($HEAD_SHA). The newer run will report."
+            echo "post=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$state" != "open" ]; then
+            echo "::notice::PR #$PR_NUMBER is $state; not commenting."
+            echo "post=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "post=true"
+            echo "number=$PR_NUMBER"
+            echo "base-sha=$(jq -r '.base.sha' "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "Render the report"
+        if: steps.pr.outputs.post == 'true'
+        id: render
+        env:
+          HEAD_SHA: ${{ steps.run.outputs.head-sha }}
+          BASE_SHA: ${{ steps.pr.outputs.base-sha }}
+          RUN_URL: ${{ steps.run.outputs.html-url }}
+          RUN_NAME: ${{ steps.run.outputs.name }}
+          CONCLUSION: ${{ steps.run.outputs.conclusion }}
+          REPORT_DIR: ${{ steps.download.outputs.dir }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" merge \
+            --dir "$REPORT_DIR" \
+            --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" \
+            --run-url "$RUN_URL" --run-name "$RUN_NAME" --conclusion "$CONCLUSION" \
+            --output "$RUNNER_TEMP/pr-report.md"
+          cat "$RUNNER_TEMP/pr-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Post the report"
+        if: steps.pr.outputs.post == 'true'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: ci-report
+          number: ${{ steps.pr.outputs.number }}
+          path: ${{ runner.temp }}/pr-report.md

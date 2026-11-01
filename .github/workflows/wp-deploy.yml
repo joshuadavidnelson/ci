@@ -1,0 +1,117 @@
+name: "Deploy to WordPress.org"
+
+# Reusable WordPress.org SVN deploy. Two gates stand between the caller's
+# tag push and the public SVN repo:
+#   1. The verify job requires the named CI workflows to have passed on the
+#      tagged commit.
+#   2. The deploy job runs in the `environment` (default "wordpress-org"),
+#      which should have a required reviewer, so it waits for a manual
+#      approval before touching SVN.
+# Keep the semver-shaped tag filter on the caller's `on: push: tags:`.
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: "WordPress.org plugin slug."
+        type: string
+        required: true
+      required-workflows:
+        description: "Workflows that must have succeeded on the tagged SHA, one name per line."
+        type: string
+        default: "Integrate"
+      environment:
+        description: "Deployment environment (configure a required reviewer on it)."
+        type: string
+        default: "wordpress-org"
+      build-dir:
+        description: "Directory to deploy instead of the repo root (10up BUILD_DIR). Empty deploys the root, filtered by .distignore."
+        type: string
+        default: ""
+      dry-run:
+        description: "Run the 10up action without committing to SVN."
+        type: boolean
+        default: false
+    secrets:
+      SVN_USERNAME:
+        description: "WordPress.org SVN username. Optional here because an environment secret of the same name also works."
+        required: false
+      SVN_PASSWORD:
+        description: "WordPress.org SVN password."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: "Verify CI passed for the tagged commit"
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: "Require the CI workflows to have passed on the tagged SHA"
+        uses: actions/github-script@v7
+        env:
+          REQUIRED: ${{ inputs.required-workflows }}
+        with:
+          script: |
+            // Named workflows rather than a check-run count: the count
+            // changes every time a matrix leg is added, and a stale
+            // threshold silently lets a tag through on partial CI.
+            const REQUIRED = process.env.REQUIRED.split( /\r?\n/ ).map( ( n ) => n.trim() ).filter( Boolean );
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head_sha: context.sha,
+                per_page: 100,
+              }
+            );
+
+            const problems = [];
+
+            for ( const name of REQUIRED ) {
+              // Newest first, so the first match is the latest run, and a
+              // re-run updates that run in place.
+              const run = runs.find( ( candidate ) => candidate.name === name );
+
+              if ( ! run ) {
+                problems.push( `${ name }: never ran on this commit` );
+              } else if ( 'completed' !== run.status ) {
+                problems.push( `${ name }: still ${ run.status }` );
+              } else if ( 'success' !== run.conclusion ) {
+                problems.push( `${ name }: ${ run.conclusion }` );
+              }
+            }
+
+            if ( problems.length ) {
+              core.setFailed(
+                `CI is not green on the tagged commit. Push the branch, let CI finish, then tag.\n` +
+                problems.map( ( problem ) => `  - ${ problem }` ).join( '\n' )
+              );
+            }
+
+  deploy:
+    name: "Deploy tag to WordPress.org"
+    needs: verify
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "WordPress Plugin Deploy"
+        uses: 10up/action-wordpress-plugin-deploy@2.3.0
+        with:
+          dry-run: ${{ inputs.dry-run }}
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: ${{ inputs.slug }}
+          BUILD_DIR: ${{ inputs.build-dir }}

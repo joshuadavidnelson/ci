@@ -1,0 +1,21 @@
+name: "Self-test report"
+
+# The ci repo's own pr-report caller, identical in shape to what adopting
+# repos use, except that it loads the renderer from the default branch's
+# commit instead of v1. workflow_run only fires from the default branch, so
+# this exercises pr-report.yml end to end on every PR here.
+
+on:
+  workflow_run:
+    workflows: [Self-test]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  actions: read
+
+jobs:
+  report:
+    uses: ./.github/workflows/pr-report.yml
+    with:
+      ci-ref: ${{ github.sha }}

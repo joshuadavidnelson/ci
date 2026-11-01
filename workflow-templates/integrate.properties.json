@@ -1,0 +1,7 @@
+{
+  "name": "Integrate (joshuadavidnelson/ci)",
+  "description": "Lint, quality, coverage and metrics for a PHP plugin (plus JS coverage and complexity) using the shared joshuadavidnelson/ci workflows.",
+  "iconName": "octicon checklist",
+  "categories": ["PHP", "JavaScript"],
+  "filePatterns": ["composer.json$"]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "PR Report (joshuadavidnelson/ci)",
+  "description": "Posts one sticky PR comment with the coverage, metrics and complexity sections from the Integrate run. Works for fork PRs.",
+  "iconName": "octicon comment",
+  "categories": ["PHP", "JavaScript"],
+  "filePatterns": ["quality-thresholds.json$"]
+}

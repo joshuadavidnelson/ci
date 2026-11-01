@@ -1,0 +1,20 @@
+{
+  "_comment": "Fixture thresholds. The fixture is fully covered, so the floors are real gates the self-test must clear.",
+  "coverage": {
+    "php": {
+      "lines": 90,
+      "methods": 90
+    }
+  },
+  "metrics": {
+    "max": {
+      "critical": 0,
+      "error": 0,
+      "avgCyclomaticComplexityByClass": 8,
+      "logicalLinesByMethod": 12,
+      "lackCohesionOfMethods": 3.5,
+      "avgEfferentCoupling": 4
+    },
+    "gate": [ "critical", "error" ]
+  }
+}

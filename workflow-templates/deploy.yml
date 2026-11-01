@@ -1,0 +1,25 @@
+name: "Deploy to WordPress.org"
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+
+jobs:
+  deploy:
+    uses: joshuadavidnelson/ci/.github/workflows/wp-deploy.yml@v1
+    permissions:
+      actions: read
+      contents: read
+    with:
+      slug: "your-plugin-slug"
+      required-workflows: |
+        Integrate
+    secrets: inherit

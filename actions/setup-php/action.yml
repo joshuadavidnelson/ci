@@ -1,0 +1,52 @@
+name: "Set up PHP and Composer"
+description: "Installs PHP, restores the Composer cache and installs dependencies."
+author: "Joshua David Nelson"
+
+# Checkout is deliberately not part of this action: callers do their own,
+# so they control the ref and path.
+#
+# The reusable workflows in this repository inline these same three steps
+# rather than calling this action, because a reusable workflow cannot refer
+# to an action at its own ref. Keep the two in step.
+
+inputs:
+  php-version:
+    description: "PHP version to install."
+    required: true
+  coverage:
+    description: "Coverage driver. Only the job that collects coverage should set this."
+    required: false
+    default: "none"
+  working-directory:
+    description: "Directory holding composer.json."
+    required: false
+    default: "."
+  tools:
+    description: "Extra tools for shivammathur/setup-php (comma-separated)."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Install PHP"
+      uses: "shivammathur/setup-php@v2"
+      with:
+        php-version: ${{ inputs.php-version }}
+        coverage: ${{ inputs.coverage }}
+        tools: ${{ inputs.tools }}
+
+    - name: "Cache Composer dependencies"
+      uses: "actions/cache@v4"
+      with:
+        path: ${{ inputs.working-directory }}/vendor
+        # Keyed on the PHP version as well as the lock file: a repo that
+        # does not pin config.platform.php resolves a different tree per
+        # PHP version, and sharing one vendor/ across them would break.
+        key: composer-${{ runner.os }}-php${{ inputs.php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
+        restore-keys: composer-${{ runner.os }}-php${{ inputs.php-version }}-
+
+    - name: "Install Composer dependencies"
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: composer install --no-progress --no-interaction

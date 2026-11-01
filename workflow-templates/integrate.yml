@@ -1,0 +1,27 @@
+name: "Integrate"
+
+on:
+  pull_request: null
+  push:
+    branches:
+      - $default-branch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  php:
+    uses: joshuadavidnelson/ci/.github/workflows/php-plugin.yml@v1
+    with:
+      php-versions: '["8.2", "8.3", "8.4", "8.5"]'
+      source-paths: "src/"
+
+  # Delete this job if the repository has no JS.
+  js:
+    uses: joshuadavidnelson/ci/.github/workflows/js.yml@v1
+    with:
+      js-source-paths: "assets/js/"

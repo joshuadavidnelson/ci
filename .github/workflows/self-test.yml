@@ -1,0 +1,134 @@
+name: "Self-test"
+
+# CI for this repository: lint the workflows, run the renderer's Jest
+# suite, and run the reusable workflows against the fixtures under
+# test/fixtures/, loading the report scripts from this very commit.
+# On a PR, self-test-report.yml then posts the merged report, so the
+# workflow_run comment path is exercised here too.
+
+on:
+  pull_request: null
+  push:
+    branches:
+      - main
+  workflow_dispatch: null
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: "actionlint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Install actionlint"
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+        run: |
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          rm actionlint.tar.gz
+
+      - name: "Lint workflows and templates"
+        run: ./actionlint -color .github/workflows/*.yml workflow-templates/*.yml
+
+  jest:
+    name: "Jest"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: "Install npm dependencies"
+        run: npm ci
+
+      - name: "Run the test suite"
+        run: npm test
+
+      - name: "Check the complexity toolchain installs from its lock file"
+        run: npm ci --prefix tools/js-complexity --no-audit --no-fund
+
+  php-fixture:
+    name: "php-plugin.yml"
+    uses: ./.github/workflows/php-plugin.yml
+    with:
+      working-directory: test/fixtures/php-plugin
+      php-versions: '["8.2", "8.4"]'
+      ci-ref: ${{ github.sha }}
+
+  js-fixture:
+    name: "js.yml"
+    uses: ./.github/workflows/js.yml
+    with:
+      working-directory: test/fixtures/js-package
+      js-source-paths: "src/"
+      # The fixture has no dependencies, so there is no npm cache to save.
+      node-cache: ""
+      ci-ref: ${{ github.sha }}
+
+  # Merges the sections the fixture runs uploaded, the way pr-report.yml
+  # does, shows the result in the step summary, and requires every fixture
+  # section to have arrived and passed.
+  render-smoke:
+    name: "Render smoke test"
+    needs: [php-fixture, js-fixture]
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Download report sections"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+          path: ${{ runner.temp }}/report
+
+      - name: "Read report-meta"
+        if: github.event_name == 'pull_request'
+        run: node actions/render-report/index.js read-meta --dir "$RUNNER_TEMP/report"
+
+      - name: "Merge the sections"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node actions/render-report/index.js merge --dir "$RUNNER_TEMP/report" \
+            --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" --run-url "$RUN_URL" \
+            --run-name "Self-test" --conclusion success --output "$RUNNER_TEMP/pr-report.md"
+          cat "$RUNNER_TEMP/pr-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Require every fixture section to pass"
+        run: |
+          for id in php-quality php-coverage php-metrics js-coverage js-complexity; do
+            file="$RUNNER_TEMP/report/report-section-$id/$id.json"
+            jq -e '.status == "pass"' "$file" > /dev/null || {
+              echo "::error::Section $id is missing or did not pass."
+              exit 1
+            }
+          done
+          if grep -q 'rejected as malformed' "$RUNNER_TEMP/pr-report.md"; then
+            echo "::error::The merge rejected a fixture section."
+            exit 1
+          fi

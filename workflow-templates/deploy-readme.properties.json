@@ -1,0 +1,7 @@
+{
+  "name": "WordPress.org readme/assets (joshuadavidnelson/ci)",
+  "description": "Syncs readme.txt and .wordpress-org assets to the plugin's SVN trunk when they change on the default branch.",
+  "iconName": "octicon file",
+  "categories": ["PHP"],
+  "filePatterns": ["readme.txt$"]
+}

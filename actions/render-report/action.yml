@@ -1,0 +1,75 @@
+name: "Render CI report"
+description: "Builds report-section JSON from coverage, metrics and complexity output, enforces section status, and merges sections into the PR report comment."
+author: "Joshua David Nelson"
+
+# Node built-ins only: index.js and src/ run as-is, so there is no dist/
+# bundle to rebuild. The same entry point also runs as `node index.js
+# <command> --option value`, which is how the reusable workflows call it.
+
+inputs:
+  command:
+    description: "php-coverage | js-coverage | php-metrics | js-complexity | checks | enforce | read-meta | merge"
+    required: true
+  head:
+    description: "PR-branch input file (clover XML, json-summary, PHPMetrics summary or ESLint JSON)."
+    required: false
+  base:
+    description: "Base-branch input file of the same kind. Missing or unreadable drops the comparison."
+    required: false
+  thresholds:
+    description: "Path to quality-thresholds.json."
+    required: false
+    default: "quality-thresholds.json"
+  output:
+    description: "Where to write the section JSON (section commands) or the comment markdown (merge)."
+    required: false
+  id:
+    description: "Section id override."
+    required: false
+  title:
+    description: "Section title override."
+    required: false
+  root:
+    description: "js-complexity: directory file paths are shown relative to."
+    required: false
+  base-root:
+    description: "js-complexity: the same, for the base checkout."
+    required: false
+  checks:
+    description: "checks: one `Label=outcome` per line, outcome being a step outcome."
+    required: false
+  section:
+    description: "enforce: section JSON path(s), one per line."
+    required: false
+  dir:
+    description: "read-meta / merge: directory holding one subdirectory per downloaded artifact."
+    required: false
+  head-sha:
+    description: "merge: PR head SHA (from the API)."
+    required: false
+  base-sha:
+    description: "merge: PR base SHA (from the API)."
+    required: false
+  run-url:
+    description: "merge: URL of the run that produced the sections."
+    required: false
+  run-name:
+    description: "merge: name of that workflow."
+    required: false
+  conclusion:
+    description: "merge: that run's conclusion."
+    required: false
+
+outputs:
+  status:
+    description: "Section status: pass, warn or fail (section commands)."
+  path:
+    description: "Path written."
+  pr-number:
+    description: "read-meta: the PR number the meta fragments agree on."
+  sections:
+    description: "merge: how many sections were merged."
+
+runs:
+  using: "node24"
+  main: "index.js"

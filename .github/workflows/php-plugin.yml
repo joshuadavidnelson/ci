@@ -1,0 +1,480 @@
+name: "PHP plugin"
+
+# Reusable CI for a PHP plugin: lint matrix → quality → tests/coverage and
+# metrics. Each reporting job uploads a `report-section-<id>` artifact and
+# the report-meta job uploads `report-meta`; pr-report.yml turns those into
+# the PR comment from a workflow_run, so nothing here needs write access.
+#
+# Repo contract and caller examples: README.md.
+
+on:
+  workflow_call:
+    inputs:
+      php-versions:
+        description: "JSON array of PHP versions for the lint matrix."
+        type: string
+        default: '["8.2", "8.3", "8.4", "8.5"]'
+      quality-php-version:
+        description: "PHP version for quality, coverage and metrics."
+        type: string
+        default: "8.4"
+      source-paths:
+        description: "Space-separated source paths, relative to working-directory. Used to measure the base branch."
+        type: string
+        default: "src/"
+      coverage:
+        description: "Collect clover coverage (composer phpunit:coverage-clover). When false, runs composer phpunit instead."
+        type: boolean
+        default: true
+      metrics:
+        description: "Run PHPMetrics on head and base (composer phpmetrics-summary)."
+        type: boolean
+        default: true
+      enforce:
+        description: "Fail CI when coverage floors or gated metrics are breached. False reports only."
+        type: boolean
+        default: true
+      thresholds-file:
+        description: "Thresholds file, relative to working-directory."
+        type: string
+        default: "quality-thresholds.json"
+      working-directory:
+        description: "Directory holding composer.json."
+        type: string
+        default: "."
+      ci-ref:
+        description: "Ref of joshuadavidnelson/ci to load the report scripts from. Match it to the ref in your `uses:` line if you pin one."
+        type: string
+        default: "v1"
+
+permissions:
+  contents: read
+
+env:
+  CI_TOOLS_REPO: "https://github.com/joshuadavidnelson/ci"
+  WORKDIR: ${{ inputs.working-directory }}
+
+jobs:
+  lint:
+    name: "Lint (PHP ${{ matrix.php }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(inputs.php-versions) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # These three steps mirror actions/setup-php. A reusable workflow
+      # cannot reference an action at its own ref, so they are inlined.
+      - name: "Install PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: "Cache Composer dependencies"
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.working-directory }}/vendor
+          key: composer-${{ runner.os }}-php${{ matrix.php }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
+          restore-keys: composer-${{ runner.os }}-php${{ matrix.php }}-
+
+      - name: "Install Composer dependencies"
+        run: composer install --no-progress --no-interaction
+
+      - name: "PHP lint"
+        run: composer run lint
+
+  quality:
+    name: "Code quality"
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        working-directory: "."
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Install PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.quality-php-version }}
+          coverage: none
+
+      - name: "Cache Composer dependencies"
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.working-directory }}/vendor
+          key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
+          restore-keys: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-
+
+      - name: "Install Composer dependencies"
+        run: composer install --no-progress --no-interaction
+
+      # Each tool runs even when an earlier one failed, so the report shows
+      # every result; the last step fails the job if any of them did.
+      - name: "PHPCS"
+        id: phpcs
+        continue-on-error: true
+        run: composer run phpcs
+
+      - name: "PHPStan"
+        id: phpstan
+        continue-on-error: true
+        run: composer run phpstan
+
+      - name: "Detect PHPMD"
+        id: has-phpmd
+        run: |
+          if jq -e '.scripts.phpmd' composer.json > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No phpmd composer script, so PHPMD is skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "PHPMD"
+        id: phpmd
+        if: steps.has-phpmd.outputs.present == 'true'
+        continue-on-error: true
+        run: composer run phpmd
+
+      - name: "Build report section"
+        if: always()
+        env:
+          CHECKS: |
+            PHPCS=${{ steps.phpcs.outcome }}
+            PHPStan=${{ steps.phpstan.outcome }}
+            PHPMD=${{ steps.phpmd.outcome }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" checks \
+            --id php-quality --title "PHP code quality" \
+            --checks "$CHECKS" \
+            --output "$RUNNER_TEMP/sections/php-quality.json"
+
+      - name: "Upload report section"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-section-php-quality
+          path: ${{ runner.temp }}/sections/php-quality.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Fail if any quality check failed"
+        if: steps.phpcs.outcome == 'failure' || steps.phpstan.outcome == 'failure' || steps.phpmd.outcome == 'failure'
+        run: |
+          echo "::error::PHPCS: ${{ steps.phpcs.outcome }}, PHPStan: ${{ steps.phpstan.outcome }}, PHPMD: ${{ steps.phpmd.outcome || 'skipped' }}"
+          exit 1
+
+  tests:
+    name: ${{ inputs.coverage && 'Tests & coverage' || 'Tests' }}
+    needs: quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        working-directory: "."
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Install PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.quality-php-version }}
+          coverage: ${{ inputs.coverage && 'xdebug' || 'none' }}
+
+      - name: "Cache Composer dependencies"
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.working-directory }}/vendor
+          key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
+          restore-keys: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-
+
+      - name: "Install Composer dependencies"
+        run: composer install --no-progress --no-interaction
+
+      - name: "Run tests"
+        if: ${{ ! inputs.coverage }}
+        run: composer run phpunit
+
+      - name: "Run tests with coverage"
+        id: tests
+        if: inputs.coverage
+        # The report and the floor check still run when tests fail, so the
+        # PR comment explains what happened. The last step fails the job.
+        continue-on-error: true
+        run: |
+          composer run phpunit:coverage-clover
+          test -s coverage/php-clover.xml || {
+            echo "::error::composer phpunit:coverage-clover did not write coverage/php-clover.xml"
+            exit 1
+          }
+
+      # Everything below produces the base-branch comparison. A base that
+      # does not yet carry the coverage script (or this directory) is
+      # expected: the report drops the Base and Δ columns and says so.
+      - name: "Checkout base branch"
+        if: inputs.coverage && github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: ".base"
+          persist-credentials: false
+
+      - name: "Measure base branch coverage"
+        if: inputs.coverage && github.event_name == 'pull_request'
+        continue-on-error: true
+        working-directory: "."
+        run: |
+          base=".base/$WORKDIR"
+          if [ ! -f "$base/composer.json" ]; then
+            echo "::notice::Base branch has no $WORKDIR/composer.json, so there is no base coverage."
+            exit 0
+          fi
+          if ! jq -e '.scripts["phpunit:coverage-clover"]' "$base/composer.json" > /dev/null; then
+            echo "::notice::Base branch has no phpunit:coverage-clover script, so there is no base coverage."
+            exit 0
+          fi
+          cd "$base"
+          composer install --no-progress --no-interaction
+          composer run phpunit:coverage-clover
+
+      - name: "Build report section"
+        if: always() && inputs.coverage && steps.tests.outcome != 'skipped'
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" php-coverage \
+            --head coverage/php-clover.xml \
+            --base "$GITHUB_WORKSPACE/.base/$WORKDIR/coverage/php-clover.xml" \
+            --thresholds "$THRESHOLDS" \
+            --output "$RUNNER_TEMP/sections/php-coverage.json"
+
+      - name: "Upload report section"
+        if: always() && inputs.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-section-php-coverage
+          path: ${{ runner.temp }}/sections/php-coverage.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Upload coverage report"
+        if: always() && inputs.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-coverage
+          path: ${{ inputs.working-directory }}/coverage/php-clover.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Require the thresholds file"
+        if: inputs.coverage && inputs.enforce
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          test -f "$THRESHOLDS" || {
+            echo "::error::$THRESHOLDS not found. Add it (see joshuadavidnelson/ci README) or set enforce: false."
+            exit 1
+          }
+
+      - name: "Enforce coverage floors"
+        if: inputs.coverage && inputs.enforce
+        run: node "$CI_TOOLS/actions/render-report/index.js" enforce --section "$RUNNER_TEMP/sections/php-coverage.json"
+
+      - name: "Fail if the tests failed"
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error::The test suite failed."
+          exit 1
+
+  metrics:
+    name: "Metrics"
+    if: inputs.metrics
+    needs: quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        working-directory: "."
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Install PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.quality-php-version }}
+          coverage: none
+
+      - name: "Cache Composer dependencies"
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.working-directory }}/vendor
+          key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
+          restore-keys: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-
+
+      - name: "Install Composer dependencies"
+        run: composer install --no-progress --no-interaction
+
+      - name: "Generate metrics summary"
+        id: head
+        continue-on-error: true
+        run: |
+          composer run phpmetrics-summary
+          test -s reports/metrics-summary.json || {
+            echo "::error::composer phpmetrics-summary did not write reports/metrics-summary.json"
+            exit 1
+          }
+
+      - name: "Checkout base branch"
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: ".base"
+          persist-credentials: false
+
+      # Measured with the PR's PHPMetrics against the base's source paths,
+      # so a base without the composer script (or vendor/) still compares.
+      - name: "Generate metrics summary for the base branch"
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          SOURCE_PATHS: ${{ inputs.source-paths }}
+        run: |
+          paths=()
+          for p in $SOURCE_PATHS; do
+            candidate="$GITHUB_WORKSPACE/.base/$WORKDIR/$p"
+            if [ -e "$candidate" ]; then
+              paths+=("$candidate")
+            fi
+          done
+          if [ "${#paths[@]}" -eq 0 ]; then
+            echo "::notice::None of '$SOURCE_PATHS' exist on the base branch, so there is no base to compare."
+            exit 0
+          fi
+          joined=$(IFS=,; echo "${paths[*]}")
+          php -d error_reporting='E_ALL & ~E_DEPRECATED' ./vendor/bin/phpmetrics \
+            --composer=false --report-summary-json=reports/base-summary.json "$joined"
+
+      - name: "Build report section"
+        if: always() && steps.head.outcome != 'skipped'
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" php-metrics \
+            --head reports/metrics-summary.json \
+            --base reports/base-summary.json \
+            --thresholds "$THRESHOLDS" \
+            --output "$RUNNER_TEMP/sections/php-metrics.json"
+
+      - name: "Upload report section"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-section-php-metrics
+          path: ${{ runner.temp }}/sections/php-metrics.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Upload metrics summaries"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpmetrics-summary
+          path: |
+            ${{ inputs.working-directory }}/reports/metrics-summary.json
+            ${{ inputs.working-directory }}/reports/base-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Require the thresholds file"
+        if: inputs.enforce
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          test -f "$THRESHOLDS" || {
+            echo "::error::$THRESHOLDS not found. Add it (see joshuadavidnelson/ci README) or set enforce: false."
+            exit 1
+          }
+
+      - name: "Enforce gated metrics"
+        if: inputs.enforce
+        run: node "$CI_TOOLS/actions/render-report/index.js" enforce --section "$RUNNER_TEMP/sections/php-metrics.json"
+
+      - name: "Fail if PHPMetrics failed"
+        if: steps.head.outcome == 'failure'
+        run: exit 1
+
+  # Points pr-report.yml at the PR. Runs without needs so the comment can
+  # still say what happened when lint fails before any section exists.
+  report-meta:
+    name: "Report metadata"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Write report-meta"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/meta"
+          jq -n --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg url "$RUN_URL" \
+            '{ pr_number: $pr, head_sha: $head, base_sha: $base, run_url: $url }' > "$RUNNER_TEMP/meta/meta.json"
+
+      - name: "Upload report-meta"
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-meta
+          path: ${{ runner.temp }}/meta/meta.json
+          retention-days: 14

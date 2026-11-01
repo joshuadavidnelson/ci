@@ -1,0 +1,31 @@
+{
+  "name": "joshuadavidnelson-ci",
+  "private": true,
+  "description": "Shared CI for joshuadavidnelson PHP/JS repositories. Dev tooling only: the actions run on Node built-ins.",
+  "license": "GPL-2.0-or-later",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/actions"
+    ],
+    "transform": {},
+    "collectCoverageFrom": [
+      "actions/**/*.js",
+      "!**/*.test.js"
+    ],
+    "coverageReporters": [
+      "text",
+      "json-summary"
+    ]
+  }
+}

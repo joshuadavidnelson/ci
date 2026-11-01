@@ -1,0 +1,13 @@
+{
+  "name": "ci-js-complexity",
+  "private": true,
+  "description": "Pinned ESLint toolchain js.yml uses to measure JS/TS complexity. Installed from this repo, never from the repo under test.",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "dependencies": {
+    "@typescript-eslint/parser": "^8.72.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-sonarjs": "^4.2.2",
+    "typescript": "~6.0.0"
+  }
+}

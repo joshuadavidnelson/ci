@@ -1,0 +1,50 @@
+name: "WordPress.org readme/assets"
+
+# Reusable: syncs readme.txt and the assets directory to the plugin's SVN
+# trunk. Scope the caller's trigger to those files (see README.md) so
+# ordinary code commits do not make a credentialed write to WordPress.org.
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: "WordPress.org plugin slug."
+        type: string
+        required: true
+      assets-dir:
+        description: "Assets directory (10up ASSETS_DIR)."
+        type: string
+        default: ".wordpress-org"
+      ignore-other-files:
+        description: "Only push readme.txt and assets, even if other files changed."
+        type: boolean
+        default: true
+    secrets:
+      SVN_USERNAME:
+        description: "WordPress.org SVN username."
+        required: true
+      SVN_PASSWORD:
+        description: "WordPress.org SVN password."
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  trunk:
+    name: "Push readme and assets to trunk"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "WordPress.org plugin asset/readme update"
+        uses: 10up/action-wordpress-plugin-asset-update@2.2.0
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: ${{ inputs.slug }}
+          ASSETS_DIR: ${{ inputs.assets-dir }}
+          IGNORE_OTHER_FILES: ${{ inputs.ignore-other-files }}

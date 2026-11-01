@@ -1,0 +1,16 @@
+# Weekly update PRs for the pinned actions (workflows and the composite
+# action) and for the npm dev tooling and the ESLint complexity toolchain.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/actions/setup-php"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/tools/js-complexity"
+    schedule:
+      interval: "weekly"

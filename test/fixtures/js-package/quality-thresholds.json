@@ -1,0 +1,17 @@
+{
+  "_comment": "Fixture thresholds for js.yml.",
+  "coverage": {
+    "js": {
+      "statements": 90,
+      "branches": 80,
+      "functions": 90,
+      "lines": 90
+    }
+  },
+  "js": {
+    "complexity": {
+      "max": { "cyclomatic": 10, "cognitive": 15 },
+      "gate": [ "cyclomatic", "cognitive" ]
+    }
+  }
+}

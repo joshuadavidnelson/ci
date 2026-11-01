@@ -1,0 +1,11 @@
+{
+  "name": "ci-fixture-js-package",
+  "private": true,
+  "description": "Fixture the ci repository's self-test runs js.yml against. Uses Node's built-in test runner, so it has no dependencies to install.",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node scripts/coverage.mjs"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Deploy to WordPress.org (joshuadavidnelson/ci)",
+  "description": "Deploys a semver tag to WordPress.org SVN after CI passed on it and a reviewer approved the wordpress-org environment.",
+  "iconName": "octicon rocket",
+  "categories": ["PHP"],
+  "filePatterns": ["readme.txt$"]
+}

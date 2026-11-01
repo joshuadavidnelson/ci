@@ -1,0 +1,24 @@
+name: "Plugin asset/readme update"
+
+on:
+  push:
+    branches:
+      - $default-branch
+    paths:
+      - "readme.txt"
+      - ".wordpress-org/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+
+jobs:
+  trunk:
+    uses: joshuadavidnelson/ci/.github/workflows/wp-readme-deploy.yml@v1
+    with:
+      slug: "your-plugin-slug"
+    secrets:
+      SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+      SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}

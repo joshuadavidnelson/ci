@@ -1,0 +1,313 @@
+name: "JS"
+
+# Reusable JS/TS coverage and complexity. Emits `report-section-js-coverage`
+# and `report-section-js-complexity`, plus `report-meta-js`, for
+# pr-report.yml in the same way php-plugin.yml does.
+#
+# Repo contract and caller examples: README.md.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node version for the repo's tests (actions/setup-node syntax)."
+        type: string
+        default: "lts/*"
+      node-cache:
+        description: "actions/setup-node cache type for the repo's dependencies; empty disables caching."
+        type: string
+        default: "npm"
+      js-source-paths:
+        description: "Space-separated paths to measure complexity over, relative to working-directory."
+        type: string
+        default: "src/"
+      coverage:
+        description: "Run `npm run test:coverage` and report coverage/coverage-summary.json."
+        type: boolean
+        default: true
+      complexity:
+        description: "Measure cyclomatic and cognitive complexity with ESLint."
+        type: boolean
+        default: true
+      enforce:
+        description: "Fail CI when coverage floors or gated complexity ceilings are breached. False reports only."
+        type: boolean
+        default: true
+      thresholds-file:
+        description: "Thresholds file, relative to working-directory."
+        type: string
+        default: "quality-thresholds.json"
+      working-directory:
+        description: "Directory holding package.json."
+        type: string
+        default: "."
+      ci-ref:
+        description: "Ref of joshuadavidnelson/ci to load the report scripts and ESLint toolchain from."
+        type: string
+        default: "v1"
+
+permissions:
+  contents: read
+
+env:
+  CI_TOOLS_REPO: "https://github.com/joshuadavidnelson/ci"
+  WORKDIR: ${{ inputs.working-directory }}
+
+jobs:
+  coverage:
+    name: "JS coverage"
+    if: inputs.coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        working-directory: "."
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.node-cache }}
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: "Install npm dependencies"
+        run: npm ci
+
+      - name: "Run tests with coverage"
+        id: tests
+        continue-on-error: true
+        run: |
+          npm run test:coverage
+          test -s coverage/coverage-summary.json || {
+            echo "::error::npm run test:coverage did not write coverage/coverage-summary.json (configure the json-summary reporter)."
+            exit 1
+          }
+
+      - name: "Checkout base branch"
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: ".base"
+          persist-credentials: false
+
+      # The base's own thresholds may fail its run; Jest and Vitest still
+      # write the summary first, and only the numbers are wanted here.
+      - name: "Measure base branch coverage"
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        working-directory: "."
+        run: |
+          base=".base/$WORKDIR"
+          if [ ! -f "$base/package.json" ] || ! jq -e '.scripts["test:coverage"]' "$base/package.json" > /dev/null; then
+            echo "::notice::Base branch has no test:coverage script, so there is no base coverage."
+            exit 0
+          fi
+          cd "$base"
+          npm ci
+          npm run test:coverage || echo "::notice::The base branch's coverage run exited non-zero; using whatever summary it wrote."
+
+      - name: "Build report section"
+        if: always() && steps.tests.outcome != 'skipped'
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" js-coverage \
+            --head coverage/coverage-summary.json \
+            --base "$GITHUB_WORKSPACE/.base/$WORKDIR/coverage/coverage-summary.json" \
+            --thresholds "$THRESHOLDS" \
+            --output "$RUNNER_TEMP/sections/js-coverage.json"
+
+      - name: "Upload report section"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-section-js-coverage
+          path: ${{ runner.temp }}/sections/js-coverage.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Upload coverage summary"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-coverage
+          path: ${{ inputs.working-directory }}/coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Require the thresholds file"
+        if: inputs.enforce
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          test -f "$THRESHOLDS" || {
+            echo "::error::$THRESHOLDS not found. Add it (see joshuadavidnelson/ci README) or set enforce: false."
+            exit 1
+          }
+
+      - name: "Enforce coverage floors"
+        if: inputs.enforce
+        run: node "$CI_TOOLS/actions/render-report/index.js" enforce --section "$RUNNER_TEMP/sections/js-coverage.json"
+
+      - name: "Fail if the tests failed"
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error::The JS test suite failed."
+          exit 1
+
+  complexity:
+    name: "JS complexity"
+    if: inputs.complexity
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        working-directory: "."
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      # The measuring toolchain is pinned in this repo (tools/js-complexity)
+      # and replaces the repo's own ESLint config, so the repo installs
+      # nothing and every repo is scored by the same rules.
+      - name: "Install the complexity toolchain"
+        working-directory: "."
+        run: npm ci --prefix "$CI_TOOLS/tools/js-complexity" --no-audit --no-fund
+
+      - name: "Measure complexity"
+        id: head
+        continue-on-error: true
+        env:
+          SOURCE_PATHS: ${{ inputs.js-source-paths }}
+        run: |
+          mkdir -p reports
+          read -r -a paths <<< "$SOURCE_PATHS"
+          # Exit 1 means parse errors, which the section reports; only a
+          # missing output file is a tooling failure.
+          node "$CI_TOOLS/tools/js-complexity/node_modules/eslint/bin/eslint.js" \
+            --config "$CI_TOOLS/tools/js-complexity/eslint.config.mjs" \
+            --no-error-on-unmatched-pattern --format json \
+            --output-file reports/eslint-complexity.json "${paths[@]}" || true
+          test -s reports/eslint-complexity.json
+
+      - name: "Checkout base branch"
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: ".base"
+          persist-credentials: false
+
+      - name: "Measure base branch complexity"
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          SOURCE_PATHS: ${{ inputs.js-source-paths }}
+        run: |
+          base="$GITHUB_WORKSPACE/.base/$WORKDIR"
+          paths=()
+          for p in $SOURCE_PATHS; do
+            if [ -e "$base/$p" ]; then
+              paths+=("$p")
+            fi
+          done
+          if [ "${#paths[@]}" -eq 0 ]; then
+            echo "::notice::None of '$SOURCE_PATHS' exist on the base branch, so there is no base to compare."
+            exit 0
+          fi
+          out="$PWD/reports/eslint-complexity-base.json"
+          cd "$base"
+          node "$CI_TOOLS/tools/js-complexity/node_modules/eslint/bin/eslint.js" \
+            --config "$CI_TOOLS/tools/js-complexity/eslint.config.mjs" \
+            --no-error-on-unmatched-pattern --format json \
+            --output-file "$out" "${paths[@]}" || true
+
+      - name: "Build report section"
+        if: always() && steps.head.outcome != 'skipped'
+        env:
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          node "$CI_TOOLS/actions/render-report/index.js" js-complexity \
+            --head reports/eslint-complexity.json \
+            --base reports/eslint-complexity-base.json \
+            --root . \
+            --base-root "$GITHUB_WORKSPACE/.base/$WORKDIR" \
+            --thresholds "$THRESHOLDS" \
+            --output "$RUNNER_TEMP/sections/js-complexity.json"
+
+      - name: "Upload report section"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-section-js-complexity
+          path: ${{ runner.temp }}/sections/js-complexity.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: "Enforce gated complexity"
+        if: inputs.enforce
+        run: node "$CI_TOOLS/actions/render-report/index.js" enforce --section "$RUNNER_TEMP/sections/js-complexity.json"
+
+      - name: "Fail if ESLint failed"
+        if: steps.head.outcome == 'failure'
+        run: |
+          echo "::error::ESLint produced no complexity output."
+          exit 1
+
+  report-meta:
+    name: "Report metadata"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Write report-meta-js"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/meta"
+          jq -n --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg url "$RUN_URL" \
+            '{ pr_number: $pr, head_sha: $head, base_sha: $base, run_url: $url }' > "$RUNNER_TEMP/meta/meta.json"
+
+      # Its own name, so a caller running php-plugin.yml and js.yml in the
+      # same workflow does not upload two artifacts called report-meta.
+      - name: "Upload report-meta-js"
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-meta-js
+          path: ${{ runner.temp }}/meta/meta.json
+          retention-days: 14
