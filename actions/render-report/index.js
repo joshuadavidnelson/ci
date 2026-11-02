@@ -29,7 +29,7 @@ const path = require( 'path' );
 const { parseClover, parseJestSummary } = require( './src/coverage' );
 const { buildCoverageSection, buildMetricsSection } = require( './src/render-pr-report' );
 const { buildComplexitySection } = require( './src/complexity' );
-const { parseSection, renderReport, reportable, parseMeta, LIMITS } = require( './src/sections' );
+const { parseSection, renderReport, reportable, worthPosting, parseMeta, LIMITS } = require( './src/sections' );
 const { parsePatterns, matchChanges } = require( './src/paths' );
 
 /**
@@ -291,11 +291,16 @@ const COMMANDS = {
 	},
 
 	changes( get, env, log ) {
-		const files = fs.readFileSync( get( 'files' ), 'utf8' ).split( /\r?\n/ ).filter( Boolean );
-		// The caller's own workflow file always counts: changing how CI runs
+		// NUL-separated (`git diff -z`) so names are never quoted or split;
+		// newlines are accepted too, for hand-written lists.
+		const files = fs.readFileSync( get( 'files' ), 'utf8' ).split( /\0|\r?\n/ ).filter( Boolean );
+		// The caller's own workflow file and the thresholds file always
+		// count, whatever `!` exclusions `paths` has: changing how CI runs
 		// must run CI.
-		const patterns = [ ...parsePatterns( get( 'paths' ) ), ...parsePatterns( get( 'always' ) ) ];
-		const { matched, files: hits } = matchChanges( files, patterns );
+		const pathHits = matchChanges( files, parsePatterns( get( 'paths' ) ) ).files;
+		const alwaysHits = matchChanges( files, parsePatterns( get( 'always' ) ) ).files;
+		const hits = [ ...new Set( [ ...pathHits, ...alwaysHits ] ) ];
+		const matched = hits.length > 0;
 		log.info( `${ files.length } changed file(s); ${ hits.length } match the paths.` );
 		for ( const hit of hits.slice( 0, 20 ) ) {
 			log.info( `  ${ hit }` );
@@ -352,7 +357,7 @@ const COMMANDS = {
 		}
 
 		// Nothing to show: no comment at all. The caller deletes a stale one.
-		if ( ! reportable( sections ).length && ! rejected.length ) {
+		if ( ! worthPosting( sections ) && ! rejected.length ) {
 			setOutput( env, 'post', 'false' );
 			setOutput( env, 'sections', 0 );
 			log.info( 'No non-empty sections: nothing to post.' );

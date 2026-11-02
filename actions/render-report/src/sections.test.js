@@ -1,6 +1,6 @@
 'use strict';
 
-const { neutralise, inline, block, parseSection, renderReport, parseMeta, sortSections, overallStatus, LIMITS } = require( './sections' );
+const { neutralise, inline, block, parseSection, renderReport, parseMeta, sortSections, overallStatus, worthPosting, LIMITS } = require( './sections' );
 
 const HEAD_SHA = 'a'.repeat( 7 ) + '1'.repeat( 33 );
 const BASE_SHA = 'b'.repeat( 7 ) + '2'.repeat( 33 );
@@ -218,11 +218,20 @@ describe( 'renderReport', () => {
 		expect( body ).toContain( '_No rows._' );
 	} );
 
-	it( 'leaves out empty sections, even failing ones', () => {
-		const body = render( { sections: [ ...sections, parse( { id: 'js-coverage', title: 'JS coverage', status: 'fail', empty: true } ) ] } );
+	it( 'leaves out an empty passing section entirely', () => {
+		const body = render( { sections: [ ...sections, parse( { id: 'js-coverage', title: 'JS coverage', status: 'pass', empty: true } ) ] } );
 
 		expect( body ).not.toContain( 'JS coverage' );
 		expect( body ).toContain( '⚠️ Nothing failed' );
+	} );
+
+	it( 'counts an empty failing section in the headline and names it, without its table', () => {
+		const body = render( { sections: [ ...sections, parse( { id: 'js-coverage', title: 'JS coverage', status: 'fail', empty: true, markdown: 'SHOULD NOT RENDER' } ) ] } );
+
+		expect( body ).toContain( '❌ At least one section failed.' );
+		expect( body ).toContain( '❌ No data to show, and failed: JS coverage.' );
+		expect( body ).not.toContain( '### ❌ JS coverage' );
+		expect( body ).not.toContain( 'SHOULD NOT RENDER' );
 	} );
 
 	it( 'sorts a prefixed id with its base id', () => {
@@ -262,5 +271,20 @@ describe( 'parseMeta', () => {
 		[ 'an oversized fragment', [ JSON.stringify( { pr_number: 1, pad: 'x'.repeat( 5000 ) } ) ], /larger than/ ],
 	] )( 'rejects %s', ( _, raws, message ) => {
 		expect( () => parseMeta( raws ) ).toThrow( message );
+	} );
+} );
+
+describe( 'worthPosting', () => {
+	it( 'posts when some section has data', () => {
+		expect( worthPosting( [ { empty: true, status: 'pass' }, { status: 'pass' } ] ) ).toBe( true );
+	} );
+
+	it( 'posts when an empty section failed, so the failure is not hidden', () => {
+		expect( worthPosting( [ { empty: true, status: 'fail' } ] ) ).toBe( true );
+	} );
+
+	it( 'does not post when every section is empty and none failed', () => {
+		expect( worthPosting( [ { empty: true, status: 'pass' }, { empty: true, status: 'warn' } ] ) ).toBe( false );
+		expect( worthPosting( [] ) ).toBe( false );
 	} );
 } );

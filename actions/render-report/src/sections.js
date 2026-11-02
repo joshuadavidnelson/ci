@@ -289,6 +289,17 @@ function reportable( sections ) {
 }
 
 /**
+ * Whether a comment is worth posting: some section has data, or some
+ * empty section failed (which must not be hidden by posting nothing).
+ *
+ * @param {Object[]} sections Validated sections.
+ * @return {boolean} True when a comment should be posted.
+ */
+function worthPosting( sections ) {
+	return sections.some( ( s ) => ! s.empty || s.status === 'fail' );
+}
+
+/**
  * Merges an arbitrary set of sections into the one PR comment.
  *
  * @param {Object}   input             Render input.
@@ -303,6 +314,10 @@ function reportable( sections ) {
  */
 function renderReport( { sections, rejected = [], headSha, baseSha = '', runUrl, runName = 'CI', conclusion = '' } ) {
 	const sorted = sortSections( reportable( sections ) );
+	// Empty sections have no table worth showing, but a failing one must
+	// still count: the headline is the worst of ALL sections, and failing
+	// empty ones are named in one line.
+	const hiddenFailures = sortSections( sections.filter( ( s ) => s.empty && s.status === 'fail' ) );
 	const shortHead = String( headSha ).slice( 0, 7 );
 	const shortBase = String( baseSha ).slice( 0, 7 );
 
@@ -310,7 +325,7 @@ function renderReport( { sections, rejected = [], headSha, baseSha = '', runUrl,
 	// fell back to showing the PR alone, "base → PR" would contradict them.
 	const comparable = shortBase && sorted.some( ( s ) => s.baseline );
 
-	const status = overallStatus( sorted );
+	const status = overallStatus( sections );
 	const headline = {
 		pass: '✅ All checks in this report passed.',
 		warn: '⚠️ Nothing failed, but some numbers moved the wrong way.',
@@ -320,6 +335,9 @@ function renderReport( { sections, rejected = [], headSha, baseSha = '', runUrl,
 	const notes = [];
 	if ( conclusion && conclusion !== 'success' ) {
 		notes.push( `> [!WARNING]\n> The ${ inline( runName, 80 ) } run concluded \`${ inline( conclusion, 40 ) }\`. Sections from jobs that did not finish are missing.` );
+	}
+	if ( hiddenFailures.length ) {
+		notes.push( `❌ No data to show, and failed: ${ hiddenFailures.map( ( s ) => inline( s.title, LIMITS.title ) ).join( ', ' ) }. See the run log.` );
 	}
 	if ( rejected.length ) {
 		notes.push(
@@ -401,5 +419,6 @@ module.exports = {
 	overallStatus,
 	renderReport,
 	reportable,
+	worthPosting,
 	parseMeta,
 };

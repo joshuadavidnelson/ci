@@ -49,7 +49,7 @@ on:
         description: "Files that make this workflow relevant to a pull request: globs relative to the repo root, newline- or space-separated. A pattern without '/' matches at any depth; '!' excludes. The calling workflow file always counts. Push and other events ignore this and run everything."
         type: string
         default: |
-          **/*.{js,jsx,ts,tsx,mjs,cjs}
+          **/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}
           package.json
           package-lock.json
           eslint.config.*
@@ -117,8 +117,9 @@ jobs:
         env:
           PATHS: ${{ inputs.paths }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
-          if ! git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"; then
+          if ! git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"; then
             echo "::warning::Could not list the PR's changes; running everything."
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -126,8 +127,11 @@ jobs:
           # owner/repo/.github/workflows/x.yml@ref → .github/workflows/x.yml
           caller="${WORKFLOW_REF#*/*/}"
           caller="${caller%@*}"
+          # The configured thresholds file always counts too.
+          thresholds="$WORKDIR/$THRESHOLDS"
+          thresholds="${thresholds#./}"
           node "$CI_TOOLS/actions/render-report/index.js" changes \
-            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller"
+            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller $thresholds"
 
   coverage:
     name: "JS coverage"
@@ -223,7 +227,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: js-coverage
+          name: ${{ inputs.report-id-prefix }}js-coverage
           path: ${{ inputs.working-directory }}/coverage/coverage-summary.json
           if-no-files-found: ignore
           retention-days: 14
@@ -357,8 +361,9 @@ jobs:
 
   report-meta:
     name: "Report metadata"
-    if: github.event_name == 'pull_request' && needs.changes.outputs.run == 'true'
-    needs: changes
+    # Every PR, even one the path gate skips: pr-report.yml needs it to
+    # find the PR and delete a stale comment.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: "Write report-meta-js"

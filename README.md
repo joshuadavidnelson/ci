@@ -228,8 +228,8 @@ Jobs: `changes` → `lint` (matrix) → `quality` → `tests` and `metrics` in p
 Defaults:
 
 - `php-plugin.yml`: `**/*.php`, `composer.json`, `composer.lock`, `phpcs.xml*`, `.phpcs.xml*`, `phpstan.neon*`, `phpunit.xml*`, `phpmd*.xml`, `quality-thresholds.json`.
-- `js.yml`: `**/*.{js,jsx,ts,tsx,mjs,cjs}`, `package.json`, `package-lock.json`, `eslint.config.*`, `jest.config.*`, `vitest.config.*`, `babel.config.*`, `tsconfig*.json`, `quality-thresholds.json`.
-- Both: the calling workflow file (e.g. `.github/workflows/integrate.yml`) always counts.
+- `js.yml`: `**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}`, `package.json`, `package-lock.json`, `eslint.config.*`, `jest.config.*`, `vitest.config.*`, `babel.config.*`, `tsconfig*.json`, `quality-thresholds.json`.
+- Both: the calling workflow file (e.g. `.github/workflows/integrate.yml`) and the configured `thresholds-file` always count, even if a `!` pattern would exclude them. Renames count as a deletion plus an addition, so moving a file out of a watched path still runs the checks.
 
 Patterns are relative to the repository root and newline- or space-separated. A pattern without `/` matches at any depth, `*` stays within a path segment, `**` crosses segments, `{a,b}` alternates and a leading `!` excludes. Pass `paths: "**"` to always run.
 
@@ -309,7 +309,7 @@ Every reporting job uploads an artifact named `report-section-<id>` holding one 
 - The body is either `markdown` or `rows`: `{ "columns": [...], "rows": [[...]], "align": ["left", "right", ...] }`, with an optional one-line `summary` above the table.
 - `baseline: true` means the section compared against the base branch; the comment only shows "base → PR" if some section did.
 - `failures` are the messages the `enforce` step prints. They are never rendered.
-- `empty: true` means the section has no data (its tool produced nothing, or measured nothing). It still counts for `enforce` (with floors configured, a coverage report that measured nothing **fails**), but it is left out of the comment. If no section with data is left, nothing is posted, and an existing `ci-report` comment is deleted.
+- `empty: true` means the section has no data (its tool produced nothing, or measured nothing). It still counts for `enforce` (with floors configured, a coverage report that measured nothing **fails**), and for the comment's headline, but its table is left out; a failing empty section is named in one line instead. If no section has data and none failed, nothing is posted, and an existing `ci-report` comment is deleted. `report-meta` is uploaded on every PR, even one the path gate skips, so that deletion can find the PR.
 
 The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-coverage`, `php-metrics`, `js-complexity` (with `report-id-prefix`, e.g. `fixture-php-coverage`, sorted the same way). Any other id is merged too, after these, alphabetically, so a repo can add its own section from its own job:
 
@@ -324,7 +324,7 @@ The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-co
     path: ${{ runner.temp }}/s/plugin-check.json
 ```
 
-`php-plugin.yml` also uploads `report-meta` and `js.yml` uploads `report-meta-js` (`report-meta-<prefix>php` / `report-meta-<prefix>js` with a prefix): `{ pr_number, head_sha, base_sha, run_url }`. `pr-report.yml` accepts any `report-meta*` artifacts as long as they agree on the PR number.
+`php-plugin.yml` also uploads `report-meta` and `js.yml` uploads `report-meta-js` on every pull request (`report-meta-<prefix>php` / `report-meta-<prefix>js` with a prefix): `{ pr_number, head_sha, base_sha, run_url }`. `pr-report.yml` accepts any `report-meta*` artifacts as long as they agree on the PR number.
 
 ### What `pr-report.yml` trusts
 

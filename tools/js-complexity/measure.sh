@@ -69,7 +69,9 @@ node "$tools/node_modules/eslint/bin/eslint.js" \
 	--config "$tools/eslint.config.mjs" \
 	--no-error-on-unmatched-pattern --format json \
 	--output-file "$out" "${paths[@]}" || true
-if valid; then
-	echo "mode=builtin"
-	echo builtin > "$out.mode"
+if ! valid; then
+	echo "::error::The built-in complexity config produced no ESLint JSON either."
+	exit 1
 fi
+echo "mode=builtin"
+echo builtin > "$out.mode"

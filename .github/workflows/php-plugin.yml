@@ -130,8 +130,9 @@ jobs:
         env:
           PATHS: ${{ inputs.paths }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
-          if ! git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"; then
+          if ! git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"; then
             echo "::warning::Could not list the PR's changes; running everything."
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -139,8 +140,11 @@ jobs:
           # owner/repo/.github/workflows/x.yml@ref → .github/workflows/x.yml
           caller="${WORKFLOW_REF#*/*/}"
           caller="${caller%@*}"
+          # The configured thresholds file always counts too.
+          thresholds="$WORKDIR/$THRESHOLDS"
+          thresholds="${thresholds#./}"
           node "$CI_TOOLS/actions/render-report/index.js" changes \
-            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller"
+            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller $thresholds"
 
   lint:
     name: "Lint (PHP ${{ matrix.php }})"
@@ -446,7 +450,7 @@ jobs:
         if: always() && steps.suite.outputs.coverage == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: php-coverage
+          name: ${{ inputs.report-id-prefix }}php-coverage
           path: ${{ inputs.working-directory }}/coverage/php-clover.xml
           if-no-files-found: ignore
           retention-days: 14
@@ -581,7 +585,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: phpmetrics-summary
+          name: ${{ inputs.report-id-prefix }}phpmetrics-summary
           path: |
             ${{ inputs.working-directory }}/reports/metrics-summary.json
             ${{ inputs.working-directory }}/reports/base-summary.json
@@ -610,8 +614,9 @@ jobs:
   # still say what happened when lint fails before any section exists.
   report-meta:
     name: "Report metadata"
-    if: github.event_name == 'pull_request' && needs.changes.outputs.run == 'true'
-    needs: changes
+    # Every PR, even one the path gate skips: pr-report.yml needs it to
+    # find the PR and delete a stale comment.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: "Write report-meta"

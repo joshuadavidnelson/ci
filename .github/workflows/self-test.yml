@@ -44,7 +44,7 @@ jobs:
         id: gate
         if: github.event_name == 'pull_request'
         run: |
-          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           node actions/render-report/index.js changes --files "$RUNNER_TEMP/changed.txt" --paths '
             .github/workflows/php-plugin.yml
             .github/workflows/js.yml
@@ -106,6 +106,15 @@ jobs:
     with:
       js-source-paths: "actions tools/js-complexity"
       complexity-script: ""
+      # The JS defaults, plus everything that feeds this repo's own
+      # measurement (measure.sh, the built-in ESLint config, actions/).
+      paths: |
+        **/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}
+        package.json
+        package-lock.json
+        quality-thresholds.json
+        actions/**
+        tools/**
       ci-ref: ${{ github.sha }}
 
   php-fixture:
