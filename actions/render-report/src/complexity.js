@@ -163,9 +163,10 @@ function complexityConfig( thresholds ) {
  * @param {string}      input.baseRoot   The same for the base checkout.
  * @param {string}      input.id         Section id.
  * @param {string}      input.title      Section title.
+ * @param {string}      input.mode       Which ESLint config measured the PR: "repo", "builtin" or ''.
  * @return {Object} A section fragment.
  */
-function buildComplexitySection( { head, base, thresholds, root = '', baseRoot = '', id = 'js-complexity', title = 'JS complexity' } ) {
+function buildComplexitySection( { head, base, thresholds, root = '', baseRoot = '', id = 'js-complexity', title = 'JS complexity', mode = '' } ) {
 	const { max, gate } = complexityConfig( thresholds );
 
 	if ( ! head ) {
@@ -173,6 +174,7 @@ function buildComplexitySection( { head, base, thresholds, root = '', baseRoot =
 			id,
 			title,
 			status: 'fail',
+			empty: true,
 			markdown: 'ESLint produced no output for this branch, so complexity could not be measured. See the run log.',
 			failures: [ 'ESLint produced no complexity output for the PR branch' ],
 		};
@@ -240,6 +242,11 @@ function buildComplexitySection( { head, base, thresholds, root = '', baseRoot =
 		.slice( 0, 10 );
 
 	const summaryParts = [];
+	if ( mode === 'repo' ) {
+		summaryParts.push( "Measured with the repo's own ESLint config." );
+	} else if ( mode === 'builtin' ) {
+		summaryParts.push( 'Measured with the built-in complexity config.' );
+	}
 	if ( ! comparable ) {
 		summaryParts.push( 'ℹ️ No base-branch measurement, so showing this branch on its own.' );
 	}
@@ -264,6 +271,8 @@ function buildComplexitySection( { head, base, thresholds, root = '', baseRoot =
 		title,
 		status,
 		baseline: comparable,
+		// No function was scored and nothing failed to parse: nothing to show.
+		...( now.functions === 0 && ! parsedHead.parseErrors ? { empty: true } : {} ),
 		...( summaryParts.length ? { summary: summaryParts.join( ' ' ) } : {} ),
 		rows: comparable
 			? { columns: [ 'Metric', 'Base', 'PR', 'Δ', 'Max' ], align: [ 'left', 'right', 'right', 'right', 'right' ], rows }

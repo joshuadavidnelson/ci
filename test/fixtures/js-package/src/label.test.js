@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { labelTitle, badgeColour } from '../src/label.js';
+import { labelTitle, badgeColour } from './label.js';
 
 test( 'labels archived titles', () => {
 	assert.equal( labelTitle( 'Hello', true ), 'Archived: Hello' );

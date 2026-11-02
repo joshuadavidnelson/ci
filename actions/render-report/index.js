@@ -16,6 +16,7 @@
  *   enforce        section JSON(s)   → exit 1 when any has status "fail"
  *   read-meta      artifact dir      → pr-number output
  *   merge          artifact dir      → comment markdown
+ *   changes        changed-file list → run output (path gate)
  *
  * Node built-ins only, so there is nothing to install or bundle.
  */
@@ -28,7 +29,8 @@ const path = require( 'path' );
 const { parseClover, parseJestSummary } = require( './src/coverage' );
 const { buildCoverageSection, buildMetricsSection } = require( './src/render-pr-report' );
 const { buildComplexitySection } = require( './src/complexity' );
-const { parseSection, renderReport, parseMeta, LIMITS } = require( './src/sections' );
+const { parseSection, renderReport, reportable, worthPosting, parseMeta, LIMITS } = require( './src/sections' );
+const { parsePatterns, matchChanges } = require( './src/paths' );
 
 /**
  * Reads options from `--key value` flags, falling back to INPUT_* env vars.
@@ -228,6 +230,7 @@ const COMMANDS = {
 				root: path.resolve( get( 'root', '.' ) ),
 				baseRoot: path.resolve( get( 'base-root', '.' ) ),
 				thresholds,
+				mode: get( 'mode' ),
 			} ),
 			get,
 			env,
@@ -287,6 +290,28 @@ const COMMANDS = {
 		return ok;
 	},
 
+	changes( get, env, log ) {
+		// NUL-separated (`git diff -z`) so names are never quoted or split;
+		// newlines are accepted too, for hand-written lists.
+		const files = fs.readFileSync( get( 'files' ), 'utf8' ).split( /\0|\r?\n/ ).filter( Boolean );
+		// The caller's own workflow file and the thresholds file always
+		// count, whatever `!` exclusions `paths` has: changing how CI runs
+		// must run CI.
+		const pathHits = matchChanges( files, parsePatterns( get( 'paths' ) ) ).files;
+		const alwaysHits = matchChanges( files, parsePatterns( get( 'always' ) ) ).files;
+		const hits = [ ...new Set( [ ...pathHits, ...alwaysHits ] ) ];
+		const matched = hits.length > 0;
+		log.info( `${ files.length } changed file(s); ${ hits.length } match the paths.` );
+		for ( const hit of hits.slice( 0, 20 ) ) {
+			log.info( `  ${ hit }` );
+		}
+		if ( ! matched ) {
+			log.info( '::notice::No changes match this workflow\'s paths, so its jobs are skipped.' );
+		}
+		setOutput( env, 'run', matched ? 'true' : 'false' );
+		return true;
+	},
+
 	'read-meta'( get, env ) {
 		const raws = artifactFiles( get( 'dir' ) )
 			.filter( ( { artifact } ) => /^report-meta(-[a-z0-9-]+)?$/.test( artifact ) )
@@ -331,6 +356,14 @@ const COMMANDS = {
 			throw new Error( 'merge: run-url must be a GitHub Actions run URL' );
 		}
 
+		// Nothing to show: no comment at all. The caller deletes a stale one.
+		if ( ! worthPosting( sections ) && ! rejected.length ) {
+			setOutput( env, 'post', 'false' );
+			setOutput( env, 'sections', 0 );
+			log.info( 'No non-empty sections: nothing to post.' );
+			return true;
+		}
+
 		const markdown = renderReport( {
 			sections,
 			rejected,
@@ -344,7 +377,8 @@ const COMMANDS = {
 		const output = get( 'output', 'pr-report.md' );
 		fs.writeFileSync( output, markdown );
 		setOutput( env, 'path', output );
-		setOutput( env, 'sections', sections.length );
+		setOutput( env, 'post', 'true' );
+		setOutput( env, 'sections', reportable( sections ).length );
 		log.info( `Merged ${ sections.length } section(s) into ${ output }` );
 		return markdown;
 	},

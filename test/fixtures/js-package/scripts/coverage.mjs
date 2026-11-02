@@ -8,18 +8,22 @@ mkdirSync( 'coverage', { recursive: true } );
 execFileSync( process.execPath, [
 	'--test',
 	'--experimental-test-coverage',
+	// Explicit include/exclude: Node 24's defaults drop src/label.js from the
+	// report when its test sits beside it in src/, leaving an empty summary.
+	'--test-coverage-include=src/**',
+	'--test-coverage-exclude=src/**/*.test.js',
 	'--test-reporter=lcov',
 	'--test-reporter-destination=coverage/lcov.info',
 	'--test-reporter=spec',
 	'--test-reporter-destination=stdout',
-	'test/*.test.js',
+	'src/*.test.js',
 ], { stdio: 'inherit' } );
 
 const totals = { lines: [ 0, 0 ], functions: [ 0, 0 ], branches: [ 0, 0 ] };
 let inSource = false;
 for ( const line of readFileSync( 'coverage/lcov.info', 'utf8' ).split( '\n' ) ) {
 	if ( line.startsWith( 'SF:' ) ) {
-		inSource = /(^|\/)src\//.test( line.slice( 3 ) );
+		inSource = /(^|\/)src\//.test( line.slice( 3 ) ) && ! line.endsWith( '.test.js' );
 	}
 	if ( ! inSource ) {
 		continue;

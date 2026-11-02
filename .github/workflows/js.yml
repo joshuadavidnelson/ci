@@ -45,6 +45,27 @@ on:
         description: "Directory holding package.json."
         type: string
         default: "."
+      paths:
+        description: "Files that make this workflow relevant to a pull request: globs relative to the repo root, newline- or space-separated. A pattern without '/' matches at any depth; '!' excludes. The calling workflow file always counts. Push and other events ignore this and run everything."
+        type: string
+        default: |
+          **/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}
+          package.json
+          package-lock.json
+          eslint.config.*
+          jest.config.*
+          vitest.config.*
+          babel.config.*
+          tsconfig*.json
+          quality-thresholds.json
+      report-id-prefix:
+        description: "Prefix for report section ids and artifact names (lowercase letters, digits, hyphens), so two calls in one run do not collide."
+        type: string
+        default: ""
+      report-title-prefix:
+        description: "Prefix for report section titles, e.g. \"Fixture: \"."
+        type: string
+        default: ""
       ci-ref:
         description: "Ref of joshuadavidnelson/ci to load the report scripts and ESLint toolchain from."
         type: string
@@ -56,11 +77,66 @@ permissions:
 env:
   CI_TOOLS_REPO: "https://github.com/joshuadavidnelson/ci"
   WORKDIR: ${{ inputs.working-directory }}
+  REPORT_PREFIX: ${{ inputs.report-id-prefix }}
+  REPORT_TITLE_PREFIX: ${{ inputs.report-title-prefix }}
 
 jobs:
+  # On a pull_request, decide whether the PR touches anything this
+  # workflow checks. If not, every other job is skipped: skipped jobs count
+  # as passing for required checks and upload no report sections. Push and
+  # other events always run in full.
+  changes:
+    name: "Detect relevant changes"
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.gate.outputs.run || 'true' }}
+    steps:
+      # The pull_request checkout is the PR's merge commit, whose first
+      # parent is the base: diffing the two gives exactly the PR's changes.
+      - name: "Checkout"
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: "Fetch CI tooling"
+        if: github.event_name == 'pull_request'
+        env:
+          CI_REF: ${{ inputs.ci-ref }}
+        run: |
+          dir="$RUNNER_TEMP/ci-tools"
+          git init -q "$dir"
+          git -C "$dir" fetch -q --depth 1 "$CI_TOOLS_REPO" "$CI_REF"
+          git -C "$dir" checkout -q FETCH_HEAD
+          echo "CI_TOOLS=$dir" >> "$GITHUB_ENV"
+
+      - name: "Match changed files against paths"
+        id: gate
+        if: github.event_name == 'pull_request'
+        env:
+          PATHS: ${{ inputs.paths }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          THRESHOLDS: ${{ inputs.thresholds-file }}
+        run: |
+          if ! git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"; then
+            echo "::warning::Could not list the PR's changes; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # owner/repo/.github/workflows/x.yml@ref → .github/workflows/x.yml
+          caller="${WORKFLOW_REF#*/*/}"
+          caller="${caller%@*}"
+          # The configured thresholds file always counts too.
+          limits_file="$WORKDIR/$THRESHOLDS"
+          limits_file="${limits_file#./}"
+          node "$CI_TOOLS/actions/render-report/index.js" changes \
+            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller $limits_file"
+
   coverage:
     name: "JS coverage"
-    if: inputs.coverage
+    if: inputs.coverage && needs.changes.outputs.run == 'true'
+    needs: changes
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -132,6 +208,7 @@ jobs:
           THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
           node "$CI_TOOLS/actions/render-report/index.js" js-coverage \
+            --id "${REPORT_PREFIX}js-coverage" --title "${REPORT_TITLE_PREFIX}JS coverage" \
             --head coverage/coverage-summary.json \
             --base "$GITHUB_WORKSPACE/.base/$WORKDIR/coverage/coverage-summary.json" \
             --thresholds "$THRESHOLDS" \
@@ -141,7 +218,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: report-section-js-coverage
+          name: report-section-${{ inputs.report-id-prefix }}js-coverage
           path: ${{ runner.temp }}/sections/js-coverage.json
           if-no-files-found: ignore
           retention-days: 14
@@ -150,7 +227,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: js-coverage
+          name: ${{ inputs.report-id-prefix }}js-coverage
           path: ${{ inputs.working-directory }}/coverage/coverage-summary.json
           if-no-files-found: ignore
           retention-days: 14
@@ -177,7 +254,8 @@ jobs:
 
   complexity:
     name: "JS complexity"
-    if: inputs.complexity
+    if: inputs.complexity && needs.changes.outputs.run == 'true'
+    needs: changes
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -253,10 +331,12 @@ jobs:
           THRESHOLDS: ${{ inputs.thresholds-file }}
         run: |
           node "$CI_TOOLS/actions/render-report/index.js" js-complexity \
+            --id "${REPORT_PREFIX}js-complexity" --title "${REPORT_TITLE_PREFIX}JS complexity" \
             --head reports/eslint-complexity.json \
             --base reports/eslint-complexity-base.json \
             --root . \
             --base-root "$GITHUB_WORKSPACE/.base/$WORKDIR" \
+            --mode "$(cat reports/eslint-complexity.json.mode 2> /dev/null || true)" \
             --thresholds "$THRESHOLDS" \
             --output "$RUNNER_TEMP/sections/js-complexity.json"
 
@@ -264,7 +344,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: report-section-js-complexity
+          name: report-section-${{ inputs.report-id-prefix }}js-complexity
           path: ${{ runner.temp }}/sections/js-complexity.json
           if-no-files-found: ignore
           retention-days: 14
@@ -281,6 +361,8 @@ jobs:
 
   report-meta:
     name: "Report metadata"
+    # Every PR, even one the path gate skips: pr-report.yml needs it to
+    # find the PR and delete a stale comment.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -300,6 +382,6 @@ jobs:
       - name: "Upload report-meta-js"
         uses: actions/upload-artifact@v7
         with:
-          name: report-meta-js
+          name: report-meta-${{ inputs.report-id-prefix }}js
           path: ${{ runner.temp }}/meta/meta.json
           retention-days: 14
