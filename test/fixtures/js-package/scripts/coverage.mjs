@@ -8,6 +8,10 @@ mkdirSync( 'coverage', { recursive: true } );
 execFileSync( process.execPath, [
 	'--test',
 	'--experimental-test-coverage',
+	// Explicit include/exclude: Node 24's defaults drop src/label.js from the
+	// report when its test sits beside it in src/, leaving an empty summary.
+	'--test-coverage-include=src/**',
+	'--test-coverage-exclude=src/**/*.test.js',
 	'--test-reporter=lcov',
 	'--test-reporter-destination=coverage/lcov.info',
 	'--test-reporter=spec',
