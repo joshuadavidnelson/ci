@@ -128,10 +128,10 @@ jobs:
           caller="${WORKFLOW_REF#*/*/}"
           caller="${caller%@*}"
           # The configured thresholds file always counts too.
-          thresholds="$WORKDIR/$THRESHOLDS"
-          thresholds="${thresholds#./}"
+          limits_file="$WORKDIR/$THRESHOLDS"
+          limits_file="${limits_file#./}"
           node "$CI_TOOLS/actions/render-report/index.js" changes \
-            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller $thresholds"
+            --files "$RUNNER_TEMP/changed.txt" --paths "$PATHS" --always "$caller $limits_file"
 
   coverage:
     name: "JS coverage"
