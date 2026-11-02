@@ -52,7 +52,7 @@ jobs:
       contents: read
     steps:
       - name: "Require the CI workflows to have passed on the tagged SHA"
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REQUIRED: ${{ inputs.required-workflows }}
         with:

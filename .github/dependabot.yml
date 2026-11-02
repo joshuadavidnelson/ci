@@ -1,16 +1,101 @@
-# Weekly update PRs for the pinned actions (workflows and the composite
-# action) and for the npm dev tooling and the ESLint complexity toolchain.
+# Dependency updates, grouped so low-risk changes arrive as one PR per
+# ecosystem and breaking changes (majors) arrive one at a time for review.
+#
+# Group order matters: Dependabot puts an update in the FIRST group it
+# matches. Package families that move in lockstep come first, with no
+# update-types, so they stay together even across a major; the broad
+# minor/patch groups come after.
 version: 2
 updates:
+  # Workflows, the composite action and the Node action.
   - package-ecosystem: "github-actions"
     directories:
       - "/"
-      - "/actions/setup-php"
+      - "/actions/*"
     schedule:
       interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      actions:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dev tooling at the root (Jest), the pinned ESLint toolchain js.yml
+  # measures complexity with, and the JS fixture.
   - package-ecosystem: "npm"
     directories:
       - "/"
       - "/tools/js-complexity"
+      - "/test/fixtures/js-package"
     schedule:
       interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "eslint-plugin-*"
+          - "@typescript-eslint/*"
+          - "typescript-eslint"
+      jest:
+        patterns:
+          - "jest"
+          - "@jest/*"
+          - "babel-jest"
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      production:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+    ignore:
+      # tools/js-complexity: @typescript-eslint/parser declares a peer range
+      # of typescript <6.1, so a TypeScript major breaks `npm ci` there
+      # (the self-test fails). Lift this once the parser supports the next
+      # major.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
+
+  # The PHP fixture the self-test runs php-plugin.yml against.
+  - package-ecosystem: "composer"
+    directories:
+      - "/test/fixtures/php-plugin"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # The fixture pins config.platform.php to 8.2, the floor it stands in
+      # for. PHPUnit 12 requires PHP 8.3, so its major can never resolve.
+      - dependency-name: "phpunit/phpunit"
+        update-types:
+          - "version-update:semver-major"
+      # Pinned to PHPMetrics 2 on purpose: the fixture mirrors the plugins'
+      # toolchain, and php-plugin.yml reads the v2 --report-summary-json
+      # shape. Move it together with the plugins, not on its own.
+      - dependency-name: "phpmetrics/phpmetrics"
+        update-types:
+          - "version-update:semver-major"

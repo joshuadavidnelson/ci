@@ -97,7 +97,7 @@ jobs:
 
       - name: "Cache Composer dependencies"
         if: ${{ ! inputs.lint-standalone }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ matrix.php }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -158,7 +158,7 @@ jobs:
           coverage: none
 
       - name: "Cache Composer dependencies"
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -210,7 +210,7 @@ jobs:
 
       - name: "Upload report section"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-section-php-quality
           path: ${{ runner.temp }}/sections/php-quality.json
@@ -290,7 +290,7 @@ jobs:
 
       - name: "Cache Composer dependencies"
         if: steps.suite.outputs.run == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -361,7 +361,7 @@ jobs:
 
       - name: "Upload report section"
         if: always() && steps.suite.outputs.coverage == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-section-php-coverage
           path: ${{ runner.temp }}/sections/php-coverage.json
@@ -370,7 +370,7 @@ jobs:
 
       - name: "Upload coverage report"
         if: always() && steps.suite.outputs.coverage == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: php-coverage
           path: ${{ inputs.working-directory }}/coverage/php-clover.xml
@@ -429,7 +429,7 @@ jobs:
           coverage: none
 
       - name: "Cache Composer dependencies"
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/vendor
           key: composer-${{ runner.os }}-php${{ inputs.quality-php-version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory), format('{0}/composer.json', inputs.working-directory)) }}
@@ -495,7 +495,7 @@ jobs:
 
       - name: "Upload report section"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-section-php-metrics
           path: ${{ runner.temp }}/sections/php-metrics.json
@@ -504,7 +504,7 @@ jobs:
 
       - name: "Upload metrics summaries"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: phpmetrics-summary
           path: |
@@ -550,7 +550,7 @@ jobs:
             '{ pr_number: $pr, head_sha: $head, base_sha: $base, run_url: $url }' > "$RUNNER_TEMP/meta/meta.json"
 
       - name: "Upload report-meta"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-meta
           path: ${{ runner.temp }}/meta/meta.json
