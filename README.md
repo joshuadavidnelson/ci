@@ -297,7 +297,7 @@ The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-co
     mkdir -p "$RUNNER_TEMP/s"
     jq -n --arg md "$(cat my-report.md)" \
       '{ id: "plugin-check", title: "Plugin Check", status: "pass", markdown: $md }' > "$RUNNER_TEMP/s/plugin-check.json"
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   with:
     name: report-section-plugin-check
     path: ${{ runner.temp }}/s/plugin-check.json
