@@ -298,9 +298,13 @@ const COMMANDS = {
 		const files = raw.split( raw.includes( '\0' ) ? '\0' : /\r?\n/ ).filter( Boolean );
 		// The caller's own workflow file and the thresholds file always
 		// count, whatever `!` exclusions `paths` has: changing how CI runs
-		// must run CI.
+		// must run CI. They are exact paths, one per line, not globs, so a
+		// name with spaces or glob characters still matches; both sides are
+		// normalised ("./a//b" and "a/b" are the same file).
+		const normalise = ( p ) => path.posix.normalize( p ).replace( /^\.\//, '' );
+		const always = new Set( get( 'always' ).split( /\r?\n/ ).map( ( p ) => p.trim() ).filter( Boolean ).map( normalise ) );
 		const pathHits = matchChanges( files, parsePatterns( get( 'paths' ) ) ).files;
-		const alwaysHits = matchChanges( files, parsePatterns( get( 'always' ) ) ).files;
+		const alwaysHits = files.filter( ( f ) => always.has( normalise( f ) ) );
 		const hits = [ ...new Set( [ ...pathHits, ...alwaysHits ] ) ];
 		const matched = hits.length > 0;
 		log.info( `${ files.length } changed file(s); ${ hits.length } match the paths.` );

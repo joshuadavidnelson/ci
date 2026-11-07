@@ -379,7 +379,21 @@ describe( 'changes', () => {
 	} );
 
 	it( 'counts a custom thresholds file passed in --always', () => {
-		expect( run( [ 'packages/app/ci-limits.json' ], '**/*.php', '.github/workflows/integrate.yml packages/app/ci-limits.json' ).output ).toBe( 'run=true\n' );
+		expect( run( [ 'packages/app/ci-limits.json' ], '**/*.php', '.github/workflows/integrate.yml\npackages/app/ci-limits.json' ).output ).toBe( 'run=true\n' );
+	} );
+
+	it.each( [
+		[ 'a trailing slash on working-directory', 'pkg/quality-thresholds.json', 'pkg//quality-thresholds.json' ],
+		[ 'a ./ working-directory', 'quality-thresholds.json', './quality-thresholds.json' ],
+		[ 'a nested ./ segment', 'pkg/limits.json', './pkg/./limits.json' ],
+		[ 'spaces in the name', 'ci config/limits.json', 'ci config/limits.json' ],
+		[ 'glob characters in the name', 'limits[1]*.json', 'limits[1]*.json' ],
+	] )( 'matches --always as an exact path despite %s', ( _, changed, always ) => {
+		expect( run( [ changed ], '**/*.php', always ).output ).toBe( 'run=true\n' );
+	} );
+
+	it( 'does not treat --always entries as globs', () => {
+		expect( run( [ 'limits-other.json' ], '**/*.php', 'limits-*.json' ).output ).toBe( 'run=false\n' );
 	} );
 
 	it( 'always runs when the caller workflow changed', () => {
