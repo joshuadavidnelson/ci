@@ -56,7 +56,9 @@ function globToRegExp( glob ) {
 		throw new Error( `paths: unbalanced "{" in "${ glob }"` );
 	}
 	const anywhere = ! glob.includes( '/' );
-	return new RegExp( `^${ anywhere ? '(?:.*/)?' : '' }${ source }$` );
+	// "s" (dotAll): Git allows newlines in file names, and "**" and the
+	// any-depth prefix (both ".*") must match across them too.
+	return new RegExp( `^${ anywhere ? '(?:.*/)?' : '' }${ source }$`, 's' );
 }
 
 /**

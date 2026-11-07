@@ -33,6 +33,16 @@ describe( 'globToRegExp', () => {
 		expect( globToRegExp( glob ).test( file ) ).toBe( expected );
 	} );
 
+	it.each( [
+		[ '**/*.js', 'src/a\nb/c.js' ],
+		[ '**', 'src/a\nb.js' ],
+		[ 'src/**', 'src/a\nb/c.js' ],
+		[ 'c.js', 'src/a\nb/c.js' ],
+		[ '*.js', 'a\nb.js' ],
+	] )( '%s matches a path with a newline in it', ( glob, file ) => {
+		expect( globToRegExp( glob ).test( file ) ).toBe( true );
+	} );
+
 	it( 'rejects an unbalanced brace', () => {
 		expect( () => globToRegExp( '*.{js' ) ).toThrow( /unbalanced/ );
 	} );
