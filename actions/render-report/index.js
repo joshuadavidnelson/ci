@@ -291,9 +291,11 @@ const COMMANDS = {
 	},
 
 	changes( get, env, log ) {
-		// NUL-separated (`git diff -z`) so names are never quoted or split;
-		// newlines are accepted too, for hand-written lists.
-		const files = fs.readFileSync( get( 'files' ), 'utf8' ).split( /\0|\r?\n/ ).filter( Boolean );
+		// NUL-separated (`git diff -z`) so names are never quoted or split.
+		// Git allows newlines in file names, so a list that has any NUL is
+		// split on NUL only; newlines separate hand-written lists.
+		const raw = fs.readFileSync( get( 'files' ), 'utf8' );
+		const files = raw.split( raw.includes( '\0' ) ? '\0' : /\r?\n/ ).filter( Boolean );
 		// The caller's own workflow file and the thresholds file always
 		// count, whatever `!` exclusions `paths` has: changing how CI runs
 		// must run CI.
@@ -357,7 +359,11 @@ const COMMANDS = {
 		}
 
 		// Nothing to show: no comment at all. The caller deletes a stale one.
-		if ( ! worthPosting( sections ) && ! rejected.length ) {
+		// A run that did not succeed still gets a comment, even with no
+		// sections (e.g. lint failed, so every reporting job was skipped):
+		// deleting the comment then would hide the failed-run warning.
+		const unsuccessful = ! [ '', 'success', 'skipped', 'neutral' ].includes( get( 'conclusion' ) );
+		if ( ! worthPosting( sections ) && ! rejected.length && ! unsuccessful ) {
 			setOutput( env, 'post', 'false' );
 			setOutput( env, 'sections', 0 );
 			log.info( 'No non-empty sections: nothing to post.' );

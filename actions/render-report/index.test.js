@@ -283,6 +283,16 @@ describe( 'read-meta and merge', () => {
 		expect( fs.readFileSync( at( 'report.md' ), 'utf8' ) ).toContain( 'No data to show, and failed: php-coverage' );
 	} );
 
+	it( 'still posts the failed-run warning when a failed run uploaded no sections', () => {
+		fs.rmSync( at( 'art/report-section-php-coverage' ), { recursive: true } );
+		fs.rmSync( at( 'art/report-section-js-coverage' ), { recursive: true } );
+		write( 'gh', '' );
+
+		main( { argv: [ 'merge', '--dir', at( 'art' ), '--head-sha', HEAD_SHA, '--run-url', RUN_URL, '--run-name', 'Integrate', '--conclusion', 'failure', '--output', at( 'report.md' ) ], env: { GITHUB_OUTPUT: at( 'gh' ) }, log: quiet() } );
+		expect( fs.readFileSync( at( 'gh' ), 'utf8' ) ).toContain( 'post=true' );
+		expect( fs.readFileSync( at( 'report.md' ), 'utf8' ) ).toContain( 'concluded `failure`' );
+	} );
+
 	it( 'posts nothing when there are no section artifacts at all', () => {
 		fs.rmSync( at( 'art/report-section-php-coverage' ), { recursive: true } );
 		fs.rmSync( at( 'art/report-section-js-coverage' ), { recursive: true } );
@@ -352,6 +362,14 @@ describe( 'changes', () => {
 		write( 'files.txt', 'readme.txt\0src/café.php\0' );
 		write( 'gh', '' );
 		main( { argv: [ 'changes', '--files', at( 'files.txt' ), '--paths', '**/*.php' ], env: { GITHUB_OUTPUT: at( 'gh' ) }, log: quiet() } );
+
+		expect( fs.readFileSync( at( 'gh' ), 'utf8' ) ).toBe( 'run=true\n' );
+	} );
+
+	it( 'keeps a newline inside a NUL-delimited file name', () => {
+		write( 'files.txt', 'readme.txt\0src/a\nb.js\0' );
+		write( 'gh', '' );
+		main( { argv: [ 'changes', '--files', at( 'files.txt' ), '--paths', 'src/**/*.js' ], env: { GITHUB_OUTPUT: at( 'gh' ) }, log: quiet() } );
 
 		expect( fs.readFileSync( at( 'gh' ), 'utf8' ) ).toBe( 'run=true\n' );
 	} );
