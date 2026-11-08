@@ -249,6 +249,7 @@ function buildMetricsSection( { head, base, max, gate = [], id = 'php-metrics', 
 			id,
 			title,
 			status: 'fail',
+			empty: true,
 			markdown: 'PHPMetrics produced no summary for this branch, so there is nothing to report. See the run log.',
 			failures: [ 'PHPMetrics produced no summary for the PR branch' ],
 		};
@@ -269,6 +270,8 @@ function buildMetricsSection( { head, base, max, gate = [], id = 'php-metrics', 
 		title,
 		status,
 		baseline: analysis.comparable,
+		// No thresholded metric had a value on either side.
+		...( analysis.rows.length ? {} : { empty: true } ),
 		markdown: renderMetricsSection( input ),
 		failures: analysis.failures,
 	};
@@ -400,8 +403,24 @@ function buildCoverageSection( { head, base, floors, id, title } ) {
 			id,
 			title,
 			status: 'fail',
+			empty: true,
 			markdown: 'No coverage report was produced for this branch, so the tests probably failed before writing one. See the run log.',
 			failures: [ `${ title }: no coverage report was produced` ],
+		};
+	}
+
+	// A report with nothing measured would render as a table of n/a and,
+	// worse, pass every floor by default. With floors configured that is a
+	// failure: whatever wrote the report did not measure this code.
+	if ( ! hasCoverage( head ) ) {
+		const floored = Object.values( floors || {} ).some( ( suite ) => suite && Object.keys( suite ).length );
+		return {
+			id,
+			title,
+			status: floored ? 'fail' : 'pass',
+			empty: true,
+			markdown: 'The coverage report contained no measured metrics.',
+			failures: floored ? [ `${ title }: the coverage report contained no measured metrics` ] : [],
 		};
 	}
 
@@ -441,7 +460,7 @@ function buildCoverageSection( { head, base, floors, id, title } ) {
 		title,
 		status,
 		baseline: comparable,
-		markdown: markdown || 'The coverage report contained no measured metrics.',
+		markdown,
 		failures,
 	};
 }

@@ -414,7 +414,13 @@ describe( 'buildMetricsSection', () => {
 		expect( section.markdown ).toContain( '| Metric | PR | Max |' );
 	} );
 
-	it( 'fails when PHPMetrics produced no summary', () => {
+	it( 'is empty when no thresholded metric has a value on either side', () => {
+		const section = buildMetricsSection( { head: { OOP: { classes: 3 } }, base: null, max: { avgEfferentCoupling: 4 } } );
+
+		expect( section ).toMatchObject( { status: 'pass', empty: true } );
+	} );
+
+		it( 'fails when PHPMetrics produced no summary', () => {
 		const section = buildMetricsSection( { head: null, base: null, max: MAX } );
 
 		expect( section.status ).toBe( 'fail' );
@@ -456,10 +462,25 @@ describe( 'buildCoverageSection', () => {
 		expect( section.markdown ).toMatch( /No coverage report/ );
 	} );
 
-	it( 'keeps a placeholder body when nothing was measured', () => {
-		const section = build( { php: { lines: null, methods: null, branches: null } }, null );
+	it( 'fails, and is empty, when floors are set but nothing was measured', () => {
+		// The n/a table that used to pass every floor by default.
+		const section = build( { php: { lines: null, methods: null, branches: null } }, php( 95 ) );
 
-		expect( section.status ).toBe( 'pass' );
-		expect( section.markdown ).toMatch( /no measured metrics/ );
+		expect( section ).toMatchObject( { status: 'fail', empty: true } );
+		expect( section.failures[ 0 ] ).toMatch( /no measured metrics/ );
+	} );
+
+	it( 'passes, but is empty, when nothing was measured and nothing is floored', () => {
+		const section = buildCoverageSection( { id: 'x', title: 'X', head: { js: { statements: null } }, base: null, floors: { js: {} } } );
+
+		expect( section ).toMatchObject( { status: 'pass', empty: true, failures: [] } );
+	} );
+
+	it( 'is empty when no report was produced', () => {
+		expect( build( null, null ).empty ).toBe( true );
+	} );
+
+	it( 'is not empty when something was measured', () => {
+		expect( build( php( 95 ), null ).empty ).toBeUndefined();
 	} );
 } );

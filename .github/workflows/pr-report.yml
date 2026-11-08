@@ -24,6 +24,9 @@ name: "PR report"
 #   - the PR number from report-meta is only a pointer: the PR's head SHA
 #     must equal the run's head SHA, from the API, before anything posts;
 #   - it needs no secrets, only the caller's GITHUB_TOKEN.
+#
+# Sections flagged empty are left out. When nothing is left, nothing is
+# posted, and an existing `ci-report` comment is deleted.
 
 on:
   workflow_call:
@@ -186,12 +189,26 @@ jobs:
             --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" \
             --run-url "$RUN_URL" --run-name "$RUN_NAME" --conclusion "$CONCLUSION" \
             --output "$RUNNER_TEMP/pr-report.md"
-          cat "$RUNNER_TEMP/pr-report.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/pr-report.md" ]; then
+            cat "$RUNNER_TEMP/pr-report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report sections with data, so no comment." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: "Post the report"
-        if: steps.pr.outputs.post == 'true'
+        if: steps.pr.outputs.post == 'true' && steps.render.outputs.post == 'true'
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: ci-report
           number: ${{ steps.pr.outputs.number }}
           path: ${{ runner.temp }}/pr-report.md
+
+      # Nothing to report (e.g. the PR only touched docs, so CI skipped its
+      # jobs): remove an earlier report rather than leave a stale one.
+      - name: "Remove a stale report"
+        if: steps.pr.outputs.post == 'true' && steps.render.outputs.post == 'false'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: ci-report
+          number: ${{ steps.pr.outputs.number }}
+          delete: true

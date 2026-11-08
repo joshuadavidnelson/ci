@@ -51,7 +51,7 @@ A repo without a suite yet (no `phpunit.xml` / `phpunit.xml.dist`, or no script 
 
 `js.yml` runs `npm ci`, so commit `package-lock.json`.
 
-Complexity runs `npm run lint:complexity -- -f json -o <file> --no-inline-config --rule 'complexity: [warn, 0]' --rule 'sonarjs/cognitive-complexity: [warn, 0]'`. The rule overrides set the thresholds to 0 so every function is reported with its score, and the ceilings from `quality-thresholds.json` are applied afterwards. Your config can read the same ceilings from `quality-thresholds.json`, so `npm run lint:complexity` fails locally on the numbers CI gates on (see [the JS fixture](test/fixtures/js-package/eslint.config.js)). Without the script, or if it produces no ESLint JSON (for example because sonarjs is not registered), js.yml falls back to this repository's pinned ESLint and [config](tools/js-complexity/eslint.config.mjs) over `js-source-paths`.
+Complexity runs `npm run lint:complexity -- -f json -o <file> --no-inline-config --rule 'complexity: [warn, 0]' --rule 'sonarjs/cognitive-complexity: [warn, 0]'`. The rule overrides set the thresholds to 0 so every function is reported with its score, and the ceilings from `quality-thresholds.json` are applied afterwards. Your config can read the same ceilings from `quality-thresholds.json`, so `npm run lint:complexity` fails locally on the numbers CI gates on (see [the JS fixture](test/fixtures/js-package/eslint.config.js)). **The config must register the sonarjs plugin for every file it lints**, because the `sonarjs/cognitive-complexity` override applies to all of them. Files the sonarjs block should not cover (tests, say) must be ignored globally with a top-level `{ ignores: [ '**/*.test.js' ] }` object, not with `ignores` inside the sonarjs block; otherwise ESLint aborts with "could not find plugin sonarjs". Without the script, or if it produces no ESLint JSON, js.yml falls back to this repository's pinned ESLint and [config](tools/js-complexity/eslint.config.mjs) over `js-source-paths`. A fallback after the script failed raises a "Complexity fell back to the built-in config" warning that includes ESLint's error output, and the section says which config measured it.
 
 ### `quality-thresholds.json`
 
@@ -212,11 +212,28 @@ jobs:
 | `enforce` | `true` | Fail on breached coverage floors and gated metrics. |
 | `thresholds-file` | `"quality-thresholds.json"` | Relative to `working-directory`. |
 | `working-directory` | `"."` | Directory holding `composer.json`. |
+| `paths` | see [Running only when relevant](#running-only-when-relevant) | Globs that make the workflow relevant to a PR. |
+| `report-id-prefix` | `""` | Prefix for section ids and artifact names, for two calls in one run. |
+| `report-title-prefix` | `""` | Prefix for section titles, e.g. `"Fixture: "`. |
 | `ci-ref` | `"v1"` | Ref of this repo to load the report scripts from (see below). |
 
 Older PHP in the lint matrix: setup-php and php-parallel-lint 1.x both run on PHP 7.4, so `php-versions: '["7.4", "8.0", "8.4"]'` works if `composer install` succeeds on every version, i.e. the lock (or `config.platform.php`) targets the oldest version. If the lock pins dev tools that need newer PHP (PHPUnit 10+, PHPStan 2), set `lint-standalone: true`: each lint leg then installs php-parallel-lint on its own and runs it over `lint-paths` (default `.`, excluding `vendor/` and `node_modules/`) instead of `composer run lint`. `lint-composer-args: "--ignore-platform-reqs"` is **not** enough on its own: parallel-lint loads the project's `vendor/autoload.php`, and PHPUnit 11's autoloaded `Functions.php` does not parse on 7.4 (the self-test hit exactly this). The self-test lints its fixture on 7.4 with `lint-standalone`.
 
-Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus `report-meta` (PRs only, no `needs`, so even a lint failure gets a comment saying so). Everything runs with `contents: read`.
+Jobs: `changes` → `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus `report-meta` (PRs only; it needs only `changes`, so even a lint failure gets a comment saying so). Everything runs with `contents: read`.
+
+### Running only when relevant
+
+`php-plugin.yml` and `js.yml` start with a `changes` job. On a `pull_request` it lists the files the PR changes (the PR's merge commit against its first parent, with plain git) and matches them against the `paths` input. If nothing matches, every other job is skipped, so a PR touching only `readme.txt` shows Integrate passing with its jobs skipped, uploads no sections, and gets no comment (an earlier comment is deleted). Push events (and tags, `workflow_dispatch`, …) always run everything, so `wp-deploy.yml` still finds a green Integrate on tagged commits.
+
+Defaults:
+
+- `php-plugin.yml`: `**/*.php`, `composer.json`, `composer.lock`, `phpcs.xml*`, `.phpcs.xml*`, `phpstan.neon*`, `phpunit.xml*`, `phpmd*.xml`, `quality-thresholds.json`.
+- `js.yml`: `**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}`, `package.json`, `package-lock.json`, `eslint.config.*`, `jest.config.*`, `vitest.config.*`, `babel.config.*`, `tsconfig*.json`, `quality-thresholds.json`.
+- Both: the calling workflow file (e.g. `.github/workflows/integrate.yml`) and the configured `thresholds-file` always count, even if a `!` pattern would exclude them. Renames count as a deletion plus an addition, so moving a file out of a watched path still runs the checks.
+
+Patterns are relative to the repository root and newline- or space-separated. A pattern without `/` matches at any depth, `*` stays within a path segment, `**` crosses segments, `{a,b}` alternates and a leading `!` excludes. Pass `paths: "**"` to always run.
+
+**Don't use `on: pull_request: paths:` in callers.** A workflow filtered out by `paths` never starts, so its checks never report, and a branch protection rule requiring them leaves the PR waiting forever. A job skipped by an `if:` does report, as skipped, which counts as passing.
 
 ### `js.yml`
 
@@ -231,6 +248,9 @@ Jobs: `lint` (matrix) → `quality` → `tests` and `metrics` in parallel, plus 
 | `enforce` | `true` | Fail on breached coverage floors and gated complexity. |
 | `thresholds-file` | `"quality-thresholds.json"` | Relative to `working-directory`. |
 | `working-directory` | `"."` | Directory holding `package.json`. |
+| `paths` | see [Running only when relevant](#running-only-when-relevant) | Globs that make the workflow relevant to a PR. |
+| `report-id-prefix` | `""` | Prefix for section ids and artifact names, for two calls in one run. |
+| `report-title-prefix` | `""` | Prefix for section titles, e.g. `"Fixture: "`. |
 | `ci-ref` | `"v1"` | As above. |
 
 ### `pr-report.yml`
@@ -289,8 +309,9 @@ Every reporting job uploads an artifact named `report-section-<id>` holding one 
 - The body is either `markdown` or `rows`: `{ "columns": [...], "rows": [[...]], "align": ["left", "right", ...] }`, with an optional one-line `summary` above the table.
 - `baseline: true` means the section compared against the base branch; the comment only shows "base → PR" if some section did.
 - `failures` are the messages the `enforce` step prints. They are never rendered.
+- `empty: true` means the section has no data (its tool produced nothing, or measured nothing). It still counts for `enforce` (with floors configured, a coverage report that measured nothing **fails**), and for the comment's headline, but its table is left out; a failing empty section is named in one line instead. If no section has data, none failed and the run succeeded, nothing is posted, and an existing `ci-report` comment is deleted. A run that failed (lint, say, so every reporting job was skipped) still posts its failed-run warning. `report-meta` is uploaded on every PR, even one the path gate skips, so that deletion can find the PR.
 
-The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-coverage`, `php-metrics`, `js-complexity`. Any other id is merged too, after these, alphabetically, so a repo can add its own section from its own job:
+The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-coverage`, `php-metrics`, `js-complexity` (with `report-id-prefix`, e.g. `fixture-php-coverage`, sorted the same way). Any other id is merged too, after these, alphabetically, so a repo can add its own section from its own job:
 
 ```yaml
 - run: |
@@ -303,7 +324,7 @@ The ids this repo emits, in display order: `php-quality`, `php-coverage`, `js-co
     path: ${{ runner.temp }}/s/plugin-check.json
 ```
 
-`php-plugin.yml` also uploads `report-meta` and `js.yml` uploads `report-meta-js`: `{ pr_number, head_sha, base_sha, run_url }`. `pr-report.yml` accepts any `report-meta*` artifacts as long as they agree on the PR number.
+`php-plugin.yml` also uploads `report-meta` and `js.yml` uploads `report-meta-js` on every pull request (`report-meta-<prefix>php` / `report-meta-<prefix>js` with a prefix): `{ pr_number, head_sha, base_sha, run_url }`. `pr-report.yml` accepts any `report-meta*` artifacts as long as they agree on the PR number.
 
 ### What `pr-report.yml` trusts
 
@@ -335,6 +356,8 @@ Things that differ from the per-repo copies:
 - The comment comes from the `PR Report` workflow (`workflow_run`), not from a job in Integrate, and so only appears after `pr-report.yml` is on `stable`.
 - Base measurement tolerates a base branch without the scripts: the Base and Δ columns disappear and the section says so.
 - The coverage, metrics and complexity sections are uploaded even when tests or a gate fail, so a failing PR still gets its numbers.
+- Jobs are skipped on PRs that change nothing in `paths` (docs-only PRs pass with skipped jobs and get no comment). Remove any `on: pull_request: paths:` filter from the caller: it would leave required checks pending.
+- Sections with no data are left out of the comment, and with nothing left there is no comment.
 - `quality-thresholds.json` must exist when `enforce` is true.
 - JS complexity is new. Add `js.complexity` ceilings to gate it, or leave the block out to keep it report-only. With a `lint:complexity` npm script, your own `eslint.config.js` is used.
 
@@ -348,6 +371,9 @@ Things that differ from the per-repo copies:
 - **`php-quality` section.** The quality job also uploads a `php-quality` section (PHPCS / PHPStan / PHPMD outcomes), which the spec did not list.
 - **Lint options.** `lint-standalone` / `lint-paths` lint without the project's dependencies, for PHP older than the lock's dev tools; `lint-composer-args` passes extra `composer install` arguments.
 - **`js.complexity` long form.** Besides the flat `{ "cyclomatic": n, "cognitive": n }` ceilings (all gated), the `{ max, gate }` form is accepted, so a ceiling can be reported without failing CI.
+- **Path gate.** `php-plugin.yml` and `js.yml` gained a `changes` job and a `paths` input; PRs that touch nothing relevant skip every job.
+- **Empty sections.** Sections carry an optional `empty` flag; empty ones are enforced but not rendered, and with nothing to show `pr-report.yml` posts nothing and deletes a stale comment.
+- **`report-id-prefix` / `report-title-prefix`.** For two calls of the same workflow in one run (this repo's own Self-test calls js.yml for itself and for a fixture).
 - **Sections on every event.** Sections are uploaded on push runs too (cheap, and the self-test merges them); `report-meta` is uploaded only for PRs, so `pr-report.yml` has nothing to post for pushes.
 
 ## Developing
@@ -358,7 +384,13 @@ npm test                         # Jest suite for actions/render-report
 node actions/render-report/index.js php-coverage --head clover.xml --output s.json
 ```
 
-The Self-test workflow runs actionlint, the Jest suite, and `php-plugin.yml` / `js.yml` against `test/fixtures/php-plugin` and `test/fixtures/js-package` using the scripts from the commit under test (`ci-ref: ${{ github.sha }}`), then merges the uploaded sections and requires every one to pass. On a PR, `self-test-report.yml` posts the report through `pr-report.yml`, exercising the whole `workflow_run` path.
+The Self-test workflow, using the scripts from the commit under test (`ci-ref: ${{ github.sha }}`):
+
+- runs actionlint and the Jest suite;
+- dogfoods `js.yml` on this repo's own Node code (`actions/`, `tools/js-complexity`) against [`quality-thresholds.json`](quality-thresholds.json): real coverage and complexity, and these are the sections a ci PR's report shows;
+- runs `php-plugin.yml` and `js.yml` against `test/fixtures/php-plugin` and `test/fixtures/js-package`, with section ids prefixed `fixture-`, but only when a PR touches the reusable workflows, `actions/`, `tools/` or `test/fixtures/` (always on push). A render smoke job then merges the sections and requires every fixture section to pass. There is no PHP at the repo root, so `php-plugin.yml` runs only against the fixture.
+
+On a PR, `self-test-report.yml` posts the report through `pr-report.yml`, exercising the whole `workflow_run` path.
 
 To release: merge to `main` with Self-test green, then tag `vX.Y.Z` and move `v1`:
 
