@@ -17,6 +17,11 @@ export default [
 			'**/build/**',
 			'**/coverage/**',
 			'**/*.min.js',
+			// Tests are not product code: their describe/it nesting would
+			// dominate the scores.
+			'**/*.test.*',
+			'**/*.spec.*',
+			'**/__tests__/**',
 		],
 	},
 	{

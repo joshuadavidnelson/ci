@@ -156,7 +156,21 @@ describe( 'buildComplexitySection', () => {
 		expect( section.summary ).toMatch( /1 file could not be parsed/ );
 	} );
 
-	it( 'fails when ESLint produced nothing', () => {
+	it( 'says which ESLint config measured the PR', () => {
+		expect( buildComplexitySection( { head, thresholds, mode: 'repo' } ).summary ).toMatch( /^Measured with the repo's own ESLint config\./ );
+		expect( buildComplexitySection( { head, thresholds, mode: 'builtin' } ).summary ).toMatch( /^Measured with the built-in complexity config\./ );
+		expect( buildComplexitySection( { head, thresholds } ).summary ).not.toMatch( /Measured with/ );
+	} );
+
+	it( 'is empty when ESLint scored no function', () => {
+		expect( buildComplexitySection( { head: [ result( 'a.js', [] ) ], thresholds } ) ).toMatchObject( { status: 'pass', empty: true } );
+	} );
+
+	it( 'is not empty when files failed to parse, so the warning shows', () => {
+		expect( buildComplexitySection( { head: [ result( 'a.js', [ { fatal: true, message: 'x' } ] ) ], thresholds } ).empty ).toBeUndefined();
+	} );
+
+		it( 'fails when ESLint produced nothing', () => {
 		expect( buildComplexitySection( { head: null, thresholds } ).status ).toBe( 'fail' );
 	} );
 } );
